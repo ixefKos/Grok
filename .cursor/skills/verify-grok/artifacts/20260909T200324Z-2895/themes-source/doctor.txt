@@ -1,0 +1,8 @@
+ok
+run_id=20260909T200324Z-2895
+repo_root=/workspace
+state_dir=/tmp/grok-verify-20260909T200324Z-2895
+themes=/tmp/grok-verify-20260909T200324Z-2895/THEMES.md
+smoke=/tmp/grok-verify-20260909T200324Z-2895/CLOUD_AGENT_SMOKE.md
+theme_count=25
+evidence_root=/workspace/.cursor/skills/verify-grok/artifacts/20260909T200324Z-2895
