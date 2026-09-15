@@ -72,9 +72,11 @@ Read `.cursor/skills/verify-grok/features/` before picking a recipe. Drive the e
 
 ## Evidence
 
-Proof lives under:
+Proof lives under (local only — gitignored; never commit):
 
 `.cursor/skills/verify-grok/artifacts/<GROK_VERIFY_RUN_ID>/<feature>/`
+
+Also accepted: repo-root `proof/` (gitignored). Prefer the skill `artifacts/` path from `control-grok`.
 
 Standards:
 
