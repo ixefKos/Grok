@@ -1,0 +1,6 @@
+# Verification evidence stays on disk, not in git.
+proof/
+.cursor/skills/verify-grok/artifacts/
+.cursor/skills/verify-*/artifacts/
+.cursor/skills/verify-*/proof/
+**/grok-verify-*/

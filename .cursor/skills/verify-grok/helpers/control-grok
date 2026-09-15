@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# Verification control surface for the Grok / IRA Harvester document repo.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="${GROK_REPO_ROOT:-$(cd "$SKILL_DIR/../../.." && pwd)}"
+RUN_ID="${GROK_VERIFY_RUN_ID:-}"
+STATE_DIR="${GROK_VERIFY_STATE_DIR:-}"
+EVIDENCE_ROOT="${GROK_VERIFY_EVIDENCE_DIR:-$SKILL_DIR/artifacts}"
+THEMES_REL="THEMES.md"
+SMOKE_REL="CLOUD_AGENT_SMOKE.md"
+MIN_THEME_COUNT="${GROK_MIN_THEME_COUNT:-20}"
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+need_run() {
+  [[ -n "$RUN_ID" ]] || die "GROK_VERIFY_RUN_ID is unset. Run: eval \"\$(control-grok launch)\""
+  [[ -n "$STATE_DIR" ]] || die "GROK_VERIFY_STATE_DIR is unset. Run: eval \"\$(control-grok launch)\""
+}
+
+themes_path() {
+  if [[ -n "${STATE_DIR:-}" && -f "$STATE_DIR/$THEMES_REL" ]]; then
+    echo "$STATE_DIR/$THEMES_REL"
+  else
+    echo "$REPO_ROOT/$THEMES_REL"
+  fi
+}
+
+smoke_path() {
+  if [[ -n "${STATE_DIR:-}" && -f "$STATE_DIR/$SMOKE_REL" ]]; then
+    echo "$STATE_DIR/$SMOKE_REL"
+  else
+    echo "$REPO_ROOT/$SMOKE_REL"
+  fi
+}
+
+evidence_dir() {
+  need_run
+  local feature="${1:-misc}"
+  local dir="$EVIDENCE_ROOT/$RUN_ID/$feature"
+  mkdir -p "$dir"
+  echo "$dir"
+}
+
+cmd_launch() {
+  local id
+  id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  local state="/tmp/grok-verify-$id"
+  mkdir -p "$state" "$EVIDENCE_ROOT/$id"
+  cp "$REPO_ROOT/$THEMES_REL" "$state/$THEMES_REL"
+  cp "$REPO_ROOT/$SMOKE_REL" "$state/$SMOKE_REL"
+  cat <<EOF
+export GROK_REPO_ROOT='$REPO_ROOT'
+export GROK_VERIFY_RUN_ID='$id'
+export GROK_VERIFY_STATE_DIR='$state'
+export GROK_VERIFY_EVIDENCE_DIR='$EVIDENCE_ROOT'
+export PATH='$SCRIPT_DIR':"\$PATH"
+EOF
+  echo "launched verify run $id (state=$state)" >&2
+}
+
+cmd_doctor() {
+  need_run
+  local themes smoke count
+  themes="$(themes_path)"
+  smoke="$(smoke_path)"
+  [[ -f "$themes" ]] || die "themes missing: $themes"
+  [[ -f "$smoke" ]] || die "smoke doc missing: $smoke"
+  [[ -d "$STATE_DIR" ]] || die "state dir missing: $STATE_DIR"
+  count="$(python3 "$SCRIPT_DIR/rtf_themes.py" "$themes" --format count)"
+  [[ "$count" -ge "$MIN_THEME_COUNT" ]] || die "theme count $count < minimum $MIN_THEME_COUNT"
+  grep -q "Cloud Agent Smoke" "$smoke" || die "smoke doc missing expected heading"
+  grep -q "sole change" "$smoke" || die "smoke doc missing expected smoke-check wording"
+  cat <<EOF
+ok
+run_id=$RUN_ID
+repo_root=$REPO_ROOT
+state_dir=$STATE_DIR
+themes=$themes
+smoke=$smoke
+theme_count=$count
+evidence_root=$EVIDENCE_ROOT/$RUN_ID
+EOF
+}
+
+cmd_themes_list() {
+  local format="${1:-json}"
+  python3 "$SCRIPT_DIR/rtf_themes.py" "$(themes_path)" --format "$format"
+}
+
+cmd_themes_scores() {
+  # Previous-score extraction: theme + previous_score only (harvester input shape).
+  local themes
+  themes="$(themes_path)"
+  GROK_HELPERS="$SCRIPT_DIR" THEMES_FILE="$themes" python3 - <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, os.environ["GROK_HELPERS"])
+from rtf_themes import parse_themes
+
+rows = parse_themes(Path(os.environ["THEMES_FILE"]))
+out = [{"theme": r["theme"], "previous_score": r["previous_score"]} for r in rows]
+print(json.dumps(out, indent=2, ensure_ascii=True))
+PY
+}
+
+cmd_smoke_check() {
+  local smoke
+  smoke="$(smoke_path)"
+  [[ -f "$smoke" ]] || die "smoke doc missing: $smoke"
+  grep -q "^# Cloud Agent Smoke" "$smoke" || die "expected H1 '# Cloud Agent Smoke'"
+  grep -q "draft pull request" "$smoke" || die "expected draft-PR wording"
+  grep -q "Smoke check:" "$smoke" || die "expected 'Smoke check:' line"
+  echo "ok smoke_doc=$smoke"
+}
+
+cmd_evidence_write() {
+  need_run
+  local feature="$1"
+  local name="$2"
+  shift 2 || true
+  local dir
+  dir="$(evidence_dir "$feature")"
+  local path="$dir/$name"
+  if [[ $# -gt 0 ]]; then
+    printf '%s\n' "$*" >"$path"
+  else
+    cat >"$path"
+  fi
+  echo "$path"
+}
+
+cmd_cleanup() {
+  need_run
+  if [[ -d "$STATE_DIR" ]]; then
+    rm -rf "$STATE_DIR"
+    echo "removed state_dir=$STATE_DIR" >&2
+  else
+    echo "state_dir already absent: $STATE_DIR" >&2
+  fi
+  echo "evidence retained at $EVIDENCE_ROOT/$RUN_ID" >&2
+  echo "ok"
+}
+
+usage() {
+  cat <<'EOF'
+usage: control-grok <command> [args]
+
+commands:
+  launch                 print shell exports for an isolated verify run (eval this)
+  doctor                 read-only health check for the current run
+  themes list [fmt]      list themes (json|tsv|count); default json
+  themes scores          emit theme + previous_score JSON for harvester input
+  smoke check            validate CLOUD_AGENT_SMOKE.md user-facing contract
+  evidence write <feature> <filename> [text...]
+                         write proof under artifacts/<run>/<feature>/
+                         (stdin used when text args omitted)
+  cleanup                remove disposable state; keep evidence artifacts
+
+env:
+  GROK_REPO_ROOT           repo root (default: discovered from skill path)
+  GROK_VERIFY_RUN_ID       set by launch
+  GROK_VERIFY_STATE_DIR    disposable copy dir set by launch
+  GROK_VERIFY_EVIDENCE_DIR evidence root (default: skill artifacts/)
+  GROK_MIN_THEME_COUNT     doctor minimum theme rows (default: 20)
+EOF
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+  case "$cmd" in
+    launch) cmd_launch "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    themes)
+      local sub="${1:-}"
+      shift || true
+      case "$sub" in
+        list) cmd_themes_list "${1:-json}" ;;
+        scores) cmd_themes_scores ;;
+        *) die "unknown themes subcommand: ${sub:-} (want list|scores)" ;;
+      esac
+      ;;
+    smoke)
+      local sub="${1:-}"
+      shift || true
+      case "$sub" in
+        check) cmd_smoke_check ;;
+        *) die "unknown smoke subcommand: ${sub:-} (want check)" ;;
+      esac
+      ;;
+    evidence)
+      local sub="${1:-}"
+      shift || true
+      case "$sub" in
+        write)
+          [[ $# -ge 2 ]] || die "usage: control-grok evidence write <feature> <filename> [text]"
+          cmd_evidence_write "$@"
+          ;;
+        *) die "unknown evidence subcommand: ${sub:-} (want write)" ;;
+      esac
+      ;;
+    cleanup) cmd_cleanup "$@" ;;
+    -h|--help|help|"") usage; [[ -n "$cmd" ]] || exit 1 ;;
+    *) die "unknown command: $cmd" ;;
+  esac
+}
+
+main "$@"

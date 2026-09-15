@@ -1,0 +1,5 @@
+# Local verification evidence (stream rule: proof on disk, not in git)
+artifacts/
+proof/
+__pycache__/
+*.pyc
