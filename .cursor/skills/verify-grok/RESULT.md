@@ -11,7 +11,7 @@ Outer Loop / human-merge packet for the verify-grok skill. Proof stays on disk (
 | RTF themes parser | `.cursor/skills/verify-grok/helpers/rtf_themes.py` |
 | Feature map | `.cursor/skills/verify-grok/features/` |
 | This handoff | `.cursor/skills/verify-grok/RESULT.md` |
-| Local proof (not in git) | `.cursor/skills/verify-grok/artifacts/<run-id>/` or `proof/` |
+| Local proof (not in git) | `.cursor/skills/verify-grok/artifacts/<run-id>/` |
 
 ## Launch / doctor / drive
 
@@ -41,24 +41,28 @@ Known ok signals:
 
 ## Where local proof lands
 
-- Default: `.cursor/skills/verify-grok/artifacts/<GROK_VERIFY_RUN_ID>/<feature>/`
-- Ignore rules: repo `.gitignore` + `.cursor/skills/verify-grok/.gitignore` cover `artifacts/`, `proof/`, and similar run evidence.
+- Default (the only accepted evidence root): `.cursor/skills/verify-grok/artifacts/<GROK_VERIFY_RUN_ID>/<feature>/`
+- Ignore rules: repo `.gitignore` + `.cursor/skills/verify-grok/.gitignore` still cover `artifacts/`, `proof/`, and similar run evidence. `proof/` stays gitignored; the harness does not write or accept it.
 
-## Last proven (this harden pass)
+## Behavior change (adversarial-review remedies)
 
-Re-run after stripping committed blobs (HARDEN_RUN_ID=20260915T220853Z-1942):
+- `themes list`, `themes scores`, `smoke check`, and `doctor` require present state-dir copies. They never fall back to live `REPO_ROOT` files. After `cleanup` (or if copies are missing), those commands fail closed.
+- `themes scores` is no longer an inline Python re-import. It calls `rtf_themes.py --format scores`. Empty-table exit codes match `list` / `count` (non-zero when zero rows).
+
+## Last proven (this review-fix pass)
+
+Re-run after removing live fallback and the second scores path:
 
 ```text
-control-grok doctor → ok, theme_count=25
-themes-source → themes.json written under artifacts/<run-id>/themes-source/
-cleanup → state removed; evidence directory still present on disk
-git check-ignore -v .cursor/skills/verify-grok/artifacts/<run-id>/themes-source/themes.json → ignored
+eval "$(… launch)" then doctor / themes list / themes scores / smoke check → ok
+themes scores → {theme, previous_score} only via rtf_themes.py --format scores
+empty table → scores/list/count exit 1
+cleanup → state removed; themes list|scores and smoke check fail closed (no live THEMES.md / CLOUD_AGENT_SMOKE.md read)
 ```
 
 Do not paste large proof JSON into this file; open the local artifacts path above.
 
 ## PR
 
-- Branch: `cursor/verify-grok-skill-3bee`
-- PR: https://github.com/ixefKos/Grok/pull/2
+- Branch: `cursor/verify-grok-review-fixes-00de`
 - Do not merge from agents unless a human explicitly asks.
