@@ -102,7 +102,7 @@ def main() -> int:
     parser.add_argument("path", type=Path, help="Path to THEMES.md")
     parser.add_argument(
         "--format",
-        choices=("json", "tsv", "count"),
+        choices=("json", "tsv", "count", "scores"),
         default="json",
         help="Output format",
     )
@@ -118,6 +118,10 @@ def main() -> int:
     if args.format == "tsv":
         for row in rows:
             print(f"{row['theme']}\t{row['previous_score']}\t{row['tier']}")
+        return 0 if rows else 1
+    if args.format == "scores":
+        out = [{"theme": r["theme"], "previous_score": r["previous_score"]} for r in rows]
+        print(json.dumps(out, indent=2, ensure_ascii=True))
         return 0 if rows else 1
     print(json.dumps(rows, indent=2, ensure_ascii=True))
     return 0 if rows else 1

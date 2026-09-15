@@ -76,8 +76,6 @@ Proof lives under (local only — gitignored; never commit):
 
 `.cursor/skills/verify-grok/artifacts/<GROK_VERIFY_RUN_ID>/<feature>/`
 
-Also accepted: repo-root `proof/` (gitignored). Prefer the skill `artifacts/` path from `control-grok`.
-
 Standards:
 
 - Exercise the real user path: parse the themes document and the smoke document as an agent/harvester would, not a hand-built fixture unrelated to those files.
