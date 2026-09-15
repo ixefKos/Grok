@@ -23,19 +23,17 @@ need_run() {
 }
 
 themes_path() {
-  if [[ -n "${STATE_DIR:-}" && -f "$STATE_DIR/$THEMES_REL" ]]; then
-    echo "$STATE_DIR/$THEMES_REL"
-  else
-    echo "$REPO_ROOT/$THEMES_REL"
-  fi
+  need_run
+  local path="$STATE_DIR/$THEMES_REL"
+  [[ -f "$path" ]] || die "themes copy missing in state dir: $path (re-run launch, or state was cleaned up)"
+  echo "$path"
 }
 
 smoke_path() {
-  if [[ -n "${STATE_DIR:-}" && -f "$STATE_DIR/$SMOKE_REL" ]]; then
-    echo "$STATE_DIR/$SMOKE_REL"
-  else
-    echo "$REPO_ROOT/$SMOKE_REL"
-  fi
+  need_run
+  local path="$STATE_DIR/$SMOKE_REL"
+  [[ -f "$path" ]] || die "smoke copy missing in state dir: $path (re-run launch, or state was cleaned up)"
+  echo "$path"
 }
 
 evidence_dir() {
@@ -93,22 +91,7 @@ cmd_themes_list() {
 }
 
 cmd_themes_scores() {
-  # Previous-score extraction: theme + previous_score only (harvester input shape).
-  local themes
-  themes="$(themes_path)"
-  GROK_HELPERS="$SCRIPT_DIR" THEMES_FILE="$themes" python3 - <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
-
-sys.path.insert(0, os.environ["GROK_HELPERS"])
-from rtf_themes import parse_themes
-
-rows = parse_themes(Path(os.environ["THEMES_FILE"]))
-out = [{"theme": r["theme"], "previous_score": r["previous_score"]} for r in rows]
-print(json.dumps(out, indent=2, ensure_ascii=True))
-PY
+  python3 "$SCRIPT_DIR/rtf_themes.py" "$(themes_path)" --format scores
 }
 
 cmd_smoke_check() {
