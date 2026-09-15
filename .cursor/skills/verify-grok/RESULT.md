@@ -51,13 +51,15 @@ Known ok signals:
 
 ## Last proven (this review-fix pass)
 
-Re-run after removing live fallback and the second scores path:
+Re-run after removing live fallback and the second scores path (REVIEW_FIX_RUN_ID=20260915T221955Z-2178):
 
 ```text
 eval "$(… launch)" then doctor / themes list / themes scores / smoke check → ok
-themes scores → {theme, previous_score} only via rtf_themes.py --format scores
-empty table → scores/list/count exit 1
-cleanup → state removed; themes list|scores and smoke check fail closed (no live THEMES.md / CLOUD_AGENT_SMOKE.md read)
+doctor → ok, theme_count=25, paths under /tmp/grok-verify-<id>/
+themes scores → {theme, previous_score} only via rtf_themes.py --format scores; Agentic AI Systems = N/A
+empty table → scores/list/count/json/tsv all exit 1
+cleanup → state removed; themes list|scores and smoke check fail closed
+  (error: … copy missing in state dir …; no live THEMES.md / CLOUD_AGENT_SMOKE.md read)
 ```
 
 Do not paste large proof JSON into this file; open the local artifacts path above.
@@ -65,4 +67,5 @@ Do not paste large proof JSON into this file; open the local artifacts path abov
 ## PR
 
 - Branch: `cursor/verify-grok-review-fixes-00de`
+- PR: https://github.com/ixefKos/Grok/pull/4
 - Do not merge from agents unless a human explicitly asks.

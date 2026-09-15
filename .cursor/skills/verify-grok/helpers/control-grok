@@ -87,11 +87,15 @@ EOF
 
 cmd_themes_list() {
   local format="${1:-json}"
-  python3 "$SCRIPT_DIR/rtf_themes.py" "$(themes_path)" --format "$format"
+  local themes
+  themes="$(themes_path)"
+  python3 "$SCRIPT_DIR/rtf_themes.py" "$themes" --format "$format"
 }
 
 cmd_themes_scores() {
-  python3 "$SCRIPT_DIR/rtf_themes.py" "$(themes_path)" --format scores
+  local themes
+  themes="$(themes_path)"
+  python3 "$SCRIPT_DIR/rtf_themes.py" "$themes" --format scores
 }
 
 cmd_smoke_check() {
