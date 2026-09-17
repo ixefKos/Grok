@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   bootSession,
   dayIndexFor,
@@ -42,7 +42,6 @@ export default function App() {
   const [nowMs, setNowMs] = useState(() => performance.now())
   const [copied, setCopied] = useState(false)
   const [wrong, setWrong] = useState<string[]>([])
-  const copyReset = useRef<number>(0)
 
   useEffect(() => {
     if (session.status !== 'playing') return
@@ -110,8 +109,6 @@ export default function App() {
       area.remove()
     }
     setCopied(true)
-    window.clearTimeout(copyReset.current)
-    copyReset.current = window.setTimeout(() => setCopied(false), 1600)
   }
 
   return (
