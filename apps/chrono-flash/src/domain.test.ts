@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DAY1_ITEMS, batteryForDay } from './battery.ts'
 import { shortTipSha } from './soft-label.ts'
+import { STORAGE_KEY, loadRecord, saveRecord } from './storage.ts'
 import {
   MIN_FAMILIES,
   MIN_ITEMS,
@@ -420,6 +421,35 @@ describe('storage boundary', () => {
       dayIndex: 1,
       outcome: { kind: 'solved', elapsedMs: 8800, correct: 4, total: 6 },
     })
+  })
+
+  it('ignores a v1 Score 6/6 Soft lock and writes only the v2 xtrends key', () => {
+    assert.equal(STORAGE_KEY, 'chrono-flash:v2:xtrends')
+    const memory = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => memory.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        memory.set(key, value)
+      },
+    } as Pick<Storage, 'getItem' | 'setItem'> as Storage
+    storage.setItem(
+      'chrono-flash:v1:battery',
+      JSON.stringify({
+        dayKey: TODAY,
+        dayIndex: 1,
+        outcome: { kind: 'solved', elapsedMs: 12_000, correct: 6, total: 6 },
+      }),
+    )
+    assert.equal(loadRecord(storage), null)
+    const fresh = {
+      dayKey: TODAY,
+      dayIndex: 1 as const,
+      outcome: { kind: 'solved' as const, elapsedMs: 8_800, correct: 9, total: 9 },
+    }
+    saveRecord(storage, fresh)
+    assert.equal(memory.has('chrono-flash:v1:battery'), true)
+    assert.deepEqual(loadRecord(storage), fresh)
+    assert.equal(dayLockEnabled({ dev: false, hostname: 'chrono-flash.vercel.app' }), true)
   })
 })
 

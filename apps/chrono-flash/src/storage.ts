@@ -1,6 +1,7 @@
 import { parseDayRecord, type DayRecord } from './domain.ts'
 
-export const STORAGE_KEY = 'chrono-flash:v1:battery'
+/** v2 invalidates Soft 6/6 IQ-battery locks. Day-lock stays ON. */
+export const STORAGE_KEY = 'chrono-flash:v2:xtrends'
 
 export function loadRecord(storage: Storage): DayRecord | null {
   try {
