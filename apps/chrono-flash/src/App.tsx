@@ -96,6 +96,7 @@ export default function App() {
   const current = session.status === 'playing' ? session.battery.items[session.index] : null
   const memoryReady =
     !current || current.kind !== 'memory' || nowMs >= memoryUnlockAt
+  const memoryFlashing = Boolean(current && current.kind === 'memory' && !memoryReady)
 
   useEffect(() => {
     if (session.status !== 'playing') return
@@ -219,7 +220,7 @@ export default function App() {
             {session.index + 1} / {session.battery.items.length}
           </p>
           <ItemPrompt item={current} memoryReady={memoryReady} />
-          {current.kind === 'memory' && !memoryReady ? null : (
+          {memoryFlashing ? null : (
             <div className={choicesClass(current)}>
               {current.choices.map((choice) => (
                 <button
@@ -239,9 +240,11 @@ export default function App() {
               ))}
             </div>
           )}
-          <button type="button" className="ghost give-up" onClick={giveUp}>
-            Give up
-          </button>
+          {memoryFlashing ? null : (
+            <button type="button" className="ghost give-up" onClick={giveUp}>
+              Give up
+            </button>
+          )}
         </section>
       ) : null}
 
@@ -255,7 +258,7 @@ export default function App() {
               ? `Score ${session.outcome.correct}/${session.outcome.total}`
               : `Score —/${session.outcome.total}`}
           </p>
-          <p className="timer result">
+          <p className={session.outcome.kind === 'solved' ? 'timer result solved' : 'timer result dnf'}>
             {session.outcome.kind === 'solved'
               ? formatElapsed(session.outcome.elapsedMs)
               : 'DNF'}

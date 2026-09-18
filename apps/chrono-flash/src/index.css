@@ -120,7 +120,14 @@ h1 {
 .timer.result {
   font-size: 1.15rem;
   font-weight: 500;
-  color: var(--muted);
+}
+
+.timer.result.solved {
+  color: var(--ok);
+}
+
+.timer.result.dnf {
+  color: var(--danger);
 }
 
 .flash-set {
