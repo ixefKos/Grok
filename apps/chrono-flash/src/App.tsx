@@ -61,6 +61,13 @@ function ShapeGrid({ cells }: { cells: readonly Cell[] }) {
   )
 }
 
+function choicesClass(item: BatteryItem): string {
+  if (item.kind === 'spatial') return 'choices spatial'
+  if (item.kind === 'memory') return 'choices memory'
+  if (item.choices.length === 3) return 'choices triple'
+  return 'choices'
+}
+
 function ItemPrompt({ item, memoryReady }: { item: BatteryItem; memoryReady: boolean }) {
   if (item.kind === 'memory' && !memoryReady) {
     return (
@@ -204,7 +211,7 @@ export default function App() {
       ) : null}
 
       {session.status === 'playing' && current ? (
-        <section className="card">
+        <section className="card playing">
           <p className="timer" aria-live="polite" aria-atomic="true">
             {formatElapsed(liveElapsed)}
           </p>
@@ -213,12 +220,18 @@ export default function App() {
           </p>
           <ItemPrompt item={current} memoryReady={memoryReady} />
           {current.kind === 'memory' && !memoryReady ? null : (
-            <div className={current.kind === 'spatial' ? 'choices spatial' : 'choices'}>
+            <div className={choicesClass(current)}>
               {current.choices.map((choice) => (
                 <button
                   key={choice.id}
                   type="button"
-                  className={choice.shape ? 'choice shape-choice' : 'choice'}
+                  className={
+                    choice.shape
+                      ? 'choice shape-choice'
+                      : current.kind === 'memory'
+                        ? 'choice memory-choice'
+                        : 'choice'
+                  }
                   onClick={() => choose(choice.id)}
                 >
                   {choice.shape ? <ShapeGrid cells={choice.shape} /> : choice.label}
@@ -226,7 +239,7 @@ export default function App() {
               ))}
             </div>
           )}
-          <button type="button" className="ghost" onClick={giveUp}>
+          <button type="button" className="ghost give-up" onClick={giveUp}>
             Give up
           </button>
         </section>

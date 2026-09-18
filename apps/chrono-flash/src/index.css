@@ -42,9 +42,15 @@ body {
 .kicker,
 .note,
 .lede,
-.prompt,
 .progress {
   color: var(--muted);
+}
+
+.prompt {
+  color: var(--ink);
+  font-size: 1.28rem;
+  font-weight: 650;
+  line-height: 1.35;
 }
 
 .kicker {
@@ -76,6 +82,11 @@ h1 {
   justify-items: center;
 }
 
+.card.playing {
+  gap: 0.75rem;
+  padding-bottom: 0.85rem;
+}
+
 .lede,
 .prompt,
 .note,
@@ -91,27 +102,34 @@ h1 {
 }
 
 .score {
-  font-weight: 650;
-  font-size: 1.15rem;
+  font-weight: 700;
+  font-size: 2.35rem;
+  letter-spacing: -0.03em;
+  color: var(--ink);
 }
 
 .timer {
   font-family: var(--mono);
-  font-size: 2.4rem;
+  font-size: 1.6rem;
   letter-spacing: 0.04em;
   margin: 0;
   font-variant-numeric: tabular-nums;
+  color: var(--muted);
 }
 
 .timer.result {
-  color: var(--ok);
+  font-size: 1.15rem;
+  font-weight: 500;
+  color: var(--muted);
 }
 
 .flash-set {
-  margin: 0.4rem 0;
-  font-size: 2.2rem;
+  margin: 0.35rem 0;
+  font-size: 2.35rem;
   letter-spacing: 0.28em;
   font-family: var(--mono);
+  font-weight: 650;
+  color: var(--ink);
 }
 
 .choices {
@@ -123,6 +141,20 @@ h1 {
 
 .choices.spatial {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.choices.triple {
+  grid-template-columns: 1fr;
+}
+
+.choices.memory .choice,
+.memory-choice {
+  font-family: var(--mono);
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: 0.16em;
+  color: var(--ink);
+  min-height: 3.1rem;
 }
 
 button {
@@ -152,7 +184,7 @@ button {
 }
 
 .shape-choice {
-  min-height: 6.4rem;
+  min-height: 4.8rem;
   display: grid;
   place-items: center;
 }
@@ -163,6 +195,13 @@ button {
   border-color: var(--line);
 }
 
+.give-up {
+  position: sticky;
+  bottom: 0.4rem;
+  width: 100%;
+  background: var(--card);
+}
+
 .shape-board {
   display: grid;
   gap: 3px;
@@ -170,8 +209,8 @@ button {
 }
 
 .shape-cell {
-  width: 1.15rem;
-  height: 1.15rem;
+  width: 1rem;
+  height: 1rem;
   border-radius: 3px;
   background: transparent;
   border: 1px solid transparent;
@@ -190,8 +229,11 @@ button {
   background: #12141a;
   border: 1px solid var(--line);
   font-family: var(--mono);
-  font-size: 0.95rem;
-  white-space: pre-wrap;
+  font-size: 0.8rem;
+  white-space: pre;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  word-break: normal;
   text-align: left;
 }
 
