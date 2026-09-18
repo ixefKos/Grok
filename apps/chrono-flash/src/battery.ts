@@ -2,6 +2,7 @@ import {
   MEMORY_FLASH_MS,
   type Battery,
   type BatteryItem,
+  type BylineCard,
   type Cell,
   type DayIndex,
 } from './domain.ts'
@@ -38,65 +39,64 @@ export function sameCells(left: readonly Cell[], right: readonly Cell[]): boolea
   return key(left) === key(right)
 }
 
-const L_TETROMINO: readonly Cell[] = [
-  [0, 0],
-  [1, 0],
-  [2, 0],
-  [2, 1],
-]
+const BYLINE: Omit<BylineCard, 'rotate'> = {
+  name: 'R. Chen',
+  outlet: 'Wire Desk',
+  time: '06:12',
+}
 
-const SPATIAL_PROMPT = L_TETROMINO
-const SPATIAL_CW90 = rotate90CW(SPATIAL_PROMPT)
-const SPATIAL_CCW90 = rotate90CCW(SPATIAL_PROMPT)
-const SPATIAL_180 = rotate180(SPATIAL_PROMPT)
-const SPATIAL_MIRROR = mirrorHorizontal(SPATIAL_PROMPT)
+function byline(rotate: BylineCard['rotate']): BylineCard {
+  return { ...BYLINE, rotate }
+}
 
 export const DAY1_ITEMS: readonly BatteryItem[] = [
   {
-    id: 'q1-pattern-doubling',
+    id: 'q1-pattern-desk-flow',
     family: 'pattern',
     kind: 'choice',
-    prompt: 'Which comes next? 2 · 4 · 8 · 16 · ?',
+    prompt: 'Which comes next? Tip → Report → Edit → ?',
     choices: [
-      { id: '24', label: '24' },
-      { id: '32', label: '32' },
-      { id: '18', label: '18' },
-      { id: '30', label: '30' },
+      { id: 'Retweet', label: 'Retweet' },
+      { id: 'Publish', label: 'Publish' },
+      { id: 'Embargo', label: 'Embargo' },
+      { id: 'Archive', label: 'Archive' },
     ],
-    answer: '32',
+    answer: 'Publish',
   },
   {
-    id: 'q2-verbal-odd-one',
+    id: 'q2-verbal-odd-source',
     family: 'verbal',
     kind: 'choice',
-    prompt: 'Odd one out: apple · banana · carrot · grape',
+    prompt:
+      'Odd one out: eyewitness video · official transcript · leaked rumor screenshot · on-the-record interview',
     choices: [
-      { id: 'apple', label: 'apple' },
-      { id: 'banana', label: 'banana' },
-      { id: 'carrot', label: 'carrot' },
-      { id: 'grape', label: 'grape' },
+      { id: 'eyewitness video', label: 'eyewitness video' },
+      { id: 'official transcript', label: 'official transcript' },
+      { id: 'leaked rumor screenshot', label: 'leaked rumor screenshot' },
+      { id: 'on-the-record interview', label: 'on-the-record interview' },
     ],
-    answer: 'carrot',
+    answer: 'leaked rumor screenshot',
   },
   {
-    id: 'q3-spatial-l-rotate',
+    id: 'q3-spatial-byline-rotate',
     family: 'spatial',
     kind: 'spatial',
-    prompt: 'Which option is the same shape rotated 90° CW?',
-    promptShape: SPATIAL_PROMPT,
+    prompt: 'Which byline card is the same card rotated 90° CW?',
+    promptByline: byline(0),
     choices: [
-      { id: 'rot-270', label: 'A', shape: SPATIAL_CCW90 },
-      { id: 'rot-90', label: 'B', shape: SPATIAL_CW90 },
-      { id: 'rot-180', label: 'C', shape: SPATIAL_180 },
-      { id: 'mirror', label: 'D', shape: SPATIAL_MIRROR },
+      { id: 'rot-270', label: 'A', byline: byline(270) },
+      { id: 'rot-90', label: 'B', byline: byline(90) },
+      { id: 'rot-180', label: 'C', byline: byline(180) },
+      { id: 'rot-0', label: 'D', byline: byline(0) },
     ],
     answer: 'rot-90',
   },
   {
-    id: 'q4-logic-flips',
+    id: 'q4-logic-wire-copy',
     family: 'logic',
     kind: 'choice',
-    prompt: 'All Flips are Glims. No Glims are Tarns. Can a Flip be a Tarn?',
+    prompt:
+      'All wire copy is edited before air. A segment aired live unedited. Was it wire copy?',
     choices: [
       { id: 'Yes', label: 'Yes' },
       { id: 'No', label: 'No' },
@@ -105,32 +105,32 @@ export const DAY1_ITEMS: readonly BatteryItem[] = [
     answer: 'No',
   },
   {
-    id: 'q5-memory-symbols',
+    id: 'q5-memory-desk-labels',
     family: 'memory',
     kind: 'memory',
     prompt: 'Which set matches?',
-    flash: ['★', '◆', '○'],
+    flash: ['LIVE', 'UPDATE', 'ANALYSIS'],
     flashMs: MEMORY_FLASH_MS,
     choices: [
-      { id: '★ ◆ ○', label: '★ ◆ ○' },
-      { id: '★ ○ ◆', label: '★ ○ ◆' },
-      { id: '◆ ★ ○', label: '◆ ★ ○' },
-      { id: '★ ◆ △', label: '★ ◆ △' },
+      { id: 'LIVE · UPDATE · ANALYSIS', label: 'LIVE · UPDATE · ANALYSIS' },
+      { id: 'LIVE · ANALYSIS · UPDATE', label: 'LIVE · ANALYSIS · UPDATE' },
+      { id: 'UPDATE · LIVE · ANALYSIS', label: 'UPDATE · LIVE · ANALYSIS' },
+      { id: 'LIVE · UPDATE · OPINION', label: 'LIVE · UPDATE · OPINION' },
     ],
-    answer: '★ ◆ ○',
+    answer: 'LIVE · UPDATE · ANALYSIS',
   },
   {
-    id: 'q6-pattern-letters',
-    family: 'pattern',
+    id: 'q6-attention-sponsored',
+    family: 'attention',
     kind: 'choice',
-    prompt: 'Complete: A C E G ?',
+    prompt: 'Which label marks a paid placement?',
     choices: [
-      { id: 'H', label: 'H' },
-      { id: 'I', label: 'I' },
-      { id: 'J', label: 'J' },
-      { id: 'F', label: 'F' },
+      { id: 'Breaking', label: 'Breaking' },
+      { id: 'Exclusive', label: 'Exclusive' },
+      { id: 'Sponsored', label: 'Sponsored' },
+      { id: 'Updated', label: 'Updated' },
     ],
-    answer: 'I',
+    answer: 'Sponsored',
   },
 ]
 

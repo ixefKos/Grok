@@ -140,8 +140,8 @@ h1 {
 
 .flash-set {
   margin: 0.35rem 0;
-  font-size: 2.35rem;
-  letter-spacing: 0.28em;
+  font-size: 1.35rem;
+  letter-spacing: 0.08em;
   font-family: var(--mono);
   font-weight: 650;
   color: var(--ink);
@@ -199,7 +199,7 @@ button {
 }
 
 .shape-choice {
-  min-height: 4.8rem;
+  min-height: 8rem;
   display: grid;
   place-items: center;
 }
@@ -243,6 +243,25 @@ button {
 .shape-cell.on {
   background: var(--accent);
   border-color: #c49204;
+}
+
+.byline-board {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 7.5rem;
+  height: 7.5rem;
+  min-width: 7.5rem;
+  min-height: 7.5rem;
+}
+
+.byline-card {
+  display: block;
+  overflow: visible;
+  width: 7rem;
+  height: 4.25rem;
+  min-width: 7rem;
+  min-height: 4.25rem;
 }
 
 .share-card {

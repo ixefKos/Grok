@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DAY1_ITEMS, batteryForDay, rotate90CW, sameCells } from './battery.ts'
+import { DAY1_ITEMS, batteryForDay } from './battery.ts'
 import {
   MIN_FAMILIES,
   MIN_ITEMS,
@@ -63,39 +63,47 @@ describe('day-1 pack coverage', () => {
   it('ships at least 6 items across at least 4 skill families', () => {
     assert.ok(battery.items.length >= MIN_ITEMS)
     assert.ok(families.length >= MIN_FAMILIES)
-    assert.deepEqual(new Set(families), new Set(['pattern', 'verbal', 'spatial', 'logic', 'memory']))
+    assert.deepEqual(
+      new Set(families),
+      new Set(['pattern', 'verbal', 'spatial', 'logic', 'memory', 'attention']),
+    )
+    assert.equal(families.join(' · '), 'pattern · verbal · spatial · logic · memory · attention')
   })
 
-  it('is not a math-only or single-family snack', () => {
+  it('is not a math-only, snack, or single-family pack', () => {
     const patternOnly = battery.items.every((item) => item.family === 'pattern')
     assert.equal(patternOnly, false)
     assert.ok(families.includes('verbal'))
     assert.ok(families.includes('spatial'))
     assert.ok(families.includes('logic'))
     assert.ok(families.includes('memory'))
+    assert.ok(families.includes('attention'))
     const mix = families.join(' · ')
     assert.equal(mix.includes('pattern'), true)
     assert.notEqual(mix, 'pattern')
-    assert.ok(mix.split(' · ').length >= 4)
+    assert.ok(mix.split(' · ').length >= 6)
   })
 
-  it('implements the accepted day-1 prompts and keys verbatim', () => {
-    assert.equal(DAY1_ITEMS[0]?.prompt, 'Which comes next? 2 · 4 · 8 · 16 · ?')
-    assert.equal(DAY1_ITEMS[0]?.answer, '32')
+  it('implements the accepted news-literacy day-1 prompts and keys verbatim', () => {
+    assert.equal(DAY1_ITEMS[0]?.prompt, 'Which comes next? Tip → Report → Edit → ?')
+    assert.equal(DAY1_ITEMS[0]?.answer, 'Publish')
     assert.deepEqual(
       DAY1_ITEMS[0]?.choices.map((choice) => choice.label),
-      ['24', '32', '18', '30'],
+      ['Retweet', 'Publish', 'Embargo', 'Archive'],
     )
 
-    assert.equal(DAY1_ITEMS[1]?.prompt, 'Odd one out: apple · banana · carrot · grape')
-    assert.equal(DAY1_ITEMS[1]?.answer, 'carrot')
+    assert.equal(
+      DAY1_ITEMS[1]?.prompt,
+      'Odd one out: eyewitness video · official transcript · leaked rumor screenshot · on-the-record interview',
+    )
+    assert.equal(DAY1_ITEMS[1]?.answer, 'leaked rumor screenshot')
 
-    assert.equal(DAY1_ITEMS[2]?.prompt, 'Which option is the same shape rotated 90° CW?')
+    assert.equal(DAY1_ITEMS[2]?.prompt, 'Which byline card is the same card rotated 90° CW?')
     assert.equal(DAY1_ITEMS[2]?.answer, 'rot-90')
 
     assert.equal(
       DAY1_ITEMS[3]?.prompt,
-      'All Flips are Glims. No Glims are Tarns. Can a Flip be a Tarn?',
+      'All wire copy is edited before air. A segment aired live unedited. Was it wire copy?',
     )
     assert.equal(DAY1_ITEMS[3]?.answer, 'No')
     assert.deepEqual(
@@ -104,33 +112,44 @@ describe('day-1 pack coverage', () => {
     )
 
     assert.equal(DAY1_ITEMS[4]?.prompt, 'Which set matches?')
-    assert.equal(DAY1_ITEMS[4]?.answer, '★ ◆ ○')
-    assert.deepEqual(DAY1_ITEMS[4]?.flash, ['★', '◆', '○'])
+    assert.equal(DAY1_ITEMS[4]?.answer, 'LIVE · UPDATE · ANALYSIS')
+    assert.deepEqual(DAY1_ITEMS[4]?.flash, ['LIVE', 'UPDATE', 'ANALYSIS'])
     assert.equal(DAY1_ITEMS[4]?.flashMs, MEMORY_FLASH_MS)
     assert.deepEqual(
       DAY1_ITEMS[4]?.choices.map((choice) => choice.label),
-      ['★ ◆ ○', '★ ○ ◆', '◆ ★ ○', '★ ◆ △'],
+      [
+        'LIVE · UPDATE · ANALYSIS',
+        'LIVE · ANALYSIS · UPDATE',
+        'UPDATE · LIVE · ANALYSIS',
+        'LIVE · UPDATE · OPINION',
+      ],
     )
 
-    assert.equal(DAY1_ITEMS[5]?.prompt, 'Complete: A C E G ?')
-    assert.equal(DAY1_ITEMS[5]?.answer, 'I')
+    assert.equal(DAY1_ITEMS[5]?.family, 'attention')
+    assert.equal(DAY1_ITEMS[5]?.prompt, 'Which label marks a paid placement?')
+    assert.equal(DAY1_ITEMS[5]?.answer, 'Sponsored')
     assert.deepEqual(
       DAY1_ITEMS[5]?.choices.map((choice) => choice.label),
-      ['H', 'I', 'J', 'F'],
+      ['Breaking', 'Exclusive', 'Sponsored', 'Updated'],
     )
   })
 
-  it('makes the spatial key the L-tetromino rotated 90° CW', () => {
+  it('makes the spatial key the byline card rotated 90° CW', () => {
     const spatial = DAY1_ITEMS[2]
-    assert.ok(spatial?.promptShape)
+    assert.ok(spatial?.promptByline)
+    assert.equal(spatial.promptByline.rotate, 0)
     const correct = spatial.choices.find((choice) => choice.id === spatial.answer)
-    assert.ok(correct?.shape)
-    assert.equal(sameCells(correct.shape, rotate90CW(spatial.promptShape)), true)
+    assert.ok(correct?.byline)
+    assert.equal(correct.byline.rotate, 90)
+    assert.equal(correct.byline.name, spatial.promptByline.name)
+    assert.equal(correct.byline.outlet, spatial.promptByline.outlet)
+    assert.equal(correct.byline.time, spatial.promptByline.time)
     const nearMisses = spatial.choices.filter((choice) => choice.id !== spatial.answer)
     assert.equal(nearMisses.length, 3)
     for (const option of nearMisses) {
-      assert.ok(option.shape)
-      assert.equal(sameCells(option.shape, rotate90CW(spatial.promptShape)), false)
+      assert.ok(option.byline)
+      assert.equal(option.byline.rotate === 90, false)
+      assert.equal(option.byline.name, spatial.promptByline.name)
     }
   })
 })
@@ -152,7 +171,7 @@ describe('timer', () => {
     const playing = startRun()
     assert.equal(playing.status, 'playing')
     if (playing.status !== 'playing') return
-    const mid = reduceSession(playing, { type: 'answer', choice: '32', elapsedMs: 4000 })
+    const mid = reduceSession(playing, { type: 'answer', choice: 'Publish', elapsedMs: 4000 })
     assert.equal(mid.status, 'playing')
     if (mid.status !== 'playing') return
     assert.equal(mid.startedAt, playing.startedAt)
@@ -163,13 +182,47 @@ describe('timer', () => {
 describe('scoring', () => {
   it('counts correct answers over the full battery', () => {
     const battery = batteryForDay(1)
-    assert.equal(scoreAnswers(battery, ['32', 'carrot', 'rot-90', 'No', '★ ◆ ○', 'I']), 6)
-    assert.equal(scoreAnswers(battery, ['24', 'apple', 'mirror', 'Yes', '★ ○ ◆', 'H']), 0)
-    assert.equal(scoreAnswers(battery, ['32', 'apple', 'rot-90', 'Yes', '★ ◆ ○', 'H']), 3)
+    assert.equal(
+      scoreAnswers(battery, [
+        'Publish',
+        'leaked rumor screenshot',
+        'rot-90',
+        'No',
+        'LIVE · UPDATE · ANALYSIS',
+        'Sponsored',
+      ]),
+      6,
+    )
+    assert.equal(
+      scoreAnswers(battery, [
+        'Retweet',
+        'eyewitness video',
+        'rot-0',
+        'Yes',
+        'LIVE · UPDATE · OPINION',
+        'Breaking',
+      ]),
+      0,
+    )
+    assert.equal(
+      scoreAnswers(battery, [
+        'Publish',
+        'eyewitness video',
+        'rot-90',
+        'Yes',
+        'LIVE · UPDATE · ANALYSIS',
+        'Breaking',
+      ]),
+      3,
+    )
   })
 
   it('finishes a mixed run as Score A/B with the live elapsed', () => {
-    const result = answerAll(startRun(), ['32', 'apple', 'rot-90', 'Yes', '★ ◆ ○', 'H'], 125_000)
+    const result = answerAll(
+      startRun(),
+      ['Publish', 'eyewitness video', 'rot-90', 'Yes', 'LIVE · UPDATE · ANALYSIS', 'Breaking'],
+      125_000,
+    )
     assert.equal(result.status, 'result')
     if (result.status !== 'result') return
     assert.deepEqual(result.outcome, {
@@ -209,7 +262,14 @@ describe('soft retry off', () => {
   })
 
   it('ignores start after a result', () => {
-    const result = answerAll(startRun(), ['32', 'carrot', 'rot-90', 'No', '★ ◆ ○', 'I'])
+    const result = answerAll(startRun(), [
+      'Publish',
+      'leaked rumor screenshot',
+      'rot-90',
+      'No',
+      'LIVE · UPDATE · ANALYSIS',
+      'Sponsored',
+    ])
     const again = reduceSession(result, { type: 'start', startedAt: 99, todayKey: TODAY })
     assert.equal(again.status, 'result')
   })
@@ -236,7 +296,7 @@ describe('share unit', () => {
 
   it('records DNF as Score —/B · DNF without a fake fast time', () => {
     const playing = startRun(batteryForDay(2))
-    const afterTwo = answerAll(playing, ['32', 'carrot'], 8000)
+    const afterTwo = answerAll(playing, ['Publish', 'leaked rumor screenshot'], 8000)
     const result = reduceSession(afterTwo, { type: 'dnf' })
     assert.equal(result.status, 'result')
     if (result.status !== 'result') return

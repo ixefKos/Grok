@@ -12,6 +12,7 @@ import {
   reduceSession,
   skillFamilies,
   type BatteryItem,
+  type BylineCard as Byline,
   type Cell,
   type DayRecord,
   type Session,
@@ -54,6 +55,9 @@ function cellKey(cell: Cell): string {
 
 const SHAPE_CELL_PX = 18
 const SHAPE_GAP_PX = 3
+const BYLINE_W = 112
+const BYLINE_H = 68
+const BYLINE_BOX = 120
 
 function shapeBoardSize(count: number): number {
   return count * SHAPE_CELL_PX + Math.max(0, count - 1) * SHAPE_GAP_PX
@@ -102,6 +106,74 @@ function ShapeGrid({ cells }: { cells: readonly Cell[] }) {
   )
 }
 
+function BylineCard({ card }: { card: Byline }) {
+  return (
+    <div
+      className="byline-board"
+      style={{
+        display: 'grid',
+        placeItems: 'center',
+        width: BYLINE_BOX,
+        height: BYLINE_BOX,
+        minWidth: BYLINE_BOX,
+        minHeight: BYLINE_BOX,
+      }}
+      aria-hidden="true"
+    >
+      <svg
+        className="byline-card"
+        width={BYLINE_W}
+        height={BYLINE_H}
+        viewBox={`0 0 ${BYLINE_W} ${BYLINE_H}`}
+        style={{
+          display: 'block',
+          width: BYLINE_W,
+          height: BYLINE_H,
+          minWidth: BYLINE_W,
+          minHeight: BYLINE_H,
+          transform: `rotate(${card.rotate}deg)`,
+          transformOrigin: 'center center',
+        }}
+      >
+        <rect
+          x="1.5"
+          y="1.5"
+          width={BYLINE_W - 3}
+          height={BYLINE_H - 3}
+          rx="7"
+          fill="#12141a"
+          stroke="#2a2f3a"
+          strokeWidth="1.5"
+        />
+        <rect x="8" y="10" width="28" height="6" rx="1.5" fill="#f2b705" />
+        <text x="10" y="32" fill="#f4f1ea" fontSize="11" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
+          {card.name}
+        </text>
+        <text x="10" y="46" fill="#9aa1ad" fontSize="10" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
+          {card.outlet}
+        </text>
+        <text x="10" y="58" fill="#9aa1ad" fontSize="10" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
+          {card.time}
+        </text>
+      </svg>
+    </div>
+  )
+}
+
+function SpatialPrompt({ item }: { item: BatteryItem }) {
+  if (item.promptByline) return <BylineCard card={item.promptByline} />
+  if (item.promptShape) return <ShapeGrid cells={item.promptShape} />
+  return null
+}
+
+function SpatialChoice({ item }: { item: ChoiceLike }) {
+  if (item.byline) return <BylineCard card={item.byline} />
+  if (item.shape) return <ShapeGrid cells={item.shape} />
+  return item.label
+}
+
+type ChoiceLike = BatteryItem['choices'][number]
+
 function choicesClass(item: BatteryItem): string {
   if (item.kind === 'spatial') return 'choices spatial'
   if (item.kind === 'memory') return 'choices memory'
@@ -113,14 +185,14 @@ function ItemPrompt({ item, memoryReady }: { item: BatteryItem; memoryReady: boo
   if (item.kind === 'memory' && !memoryReady) {
     return (
       <p className="flash-set" aria-label="Memorize this set">
-        {(item.flash ?? []).join(' ')}
+        {(item.flash ?? []).join(' · ')}
       </p>
     )
   }
   return (
     <>
       <p className="prompt">{item.prompt}</p>
-      {item.kind === 'spatial' && item.promptShape ? <ShapeGrid cells={item.promptShape} /> : null}
+      {item.kind === 'spatial' ? <SpatialPrompt item={item} /> : null}
     </>
   )
 }
@@ -278,7 +350,7 @@ export default function App() {
                   key={choice.id}
                   type="button"
                   className={
-                    choice.shape
+                    choice.shape || choice.byline
                       ? 'choice shape-choice'
                       : current.kind === 'memory'
                         ? 'choice memory-choice'
@@ -286,7 +358,7 @@ export default function App() {
                   }
                   onClick={() => choose(choice.id)}
                 >
-                  {choice.shape ? <ShapeGrid cells={choice.shape} /> : choice.label}
+                  {choice.shape || choice.byline ? <SpatialChoice item={choice} /> : choice.label}
                 </button>
               ))}
             </div>

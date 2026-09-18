@@ -10,10 +10,20 @@ export type SkillFamily =
 
 export type Cell = readonly [row: number, col: number]
 
+export type BylineRotate = 0 | 90 | 180 | 270
+
+export type BylineCard = {
+  name: string
+  outlet: string
+  time: string
+  rotate: BylineRotate
+}
+
 export type Choice = {
   id: string
   label: string
   shape?: readonly Cell[]
+  byline?: BylineCard
 }
 
 export type ItemKind = 'choice' | 'spatial' | 'memory'
@@ -28,6 +38,7 @@ export type BatteryItem = {
   flash?: readonly string[]
   flashMs?: number
   promptShape?: readonly Cell[]
+  promptByline?: BylineCard
 }
 
 export type Battery = {

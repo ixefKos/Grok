@@ -1,4 +1,4 @@
-export const SOFT_KICKER = 'IQ Battery Soft'
-export const SOFT_TITLE = 'Chrono Flash · IQ Battery Soft'
+export const SOFT_KICKER = 'News Soft'
+export const SOFT_TITLE = 'Chrono Flash · News Soft'
 /** Short tip SHA for the Soft home label. Update when this Soft ships. */
-export const SOFT_TIP = 'a460675'
+export const SOFT_TIP = 'pending'
