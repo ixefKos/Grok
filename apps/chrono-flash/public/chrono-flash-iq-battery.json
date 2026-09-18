@@ -1,5 +1,5 @@
 {
   "product": "news-soft-xtrends",
-  "items": 8,
-  "families": ["verbal", "logic", "attention", "pattern", "memory", "spatial"]
+  "items": 9,
+  "families": ["verbal", "logic", "attention", "pattern", "memory"]
 }

@@ -2,7 +2,6 @@ import {
   MEMORY_FLASH_MS,
   type Battery,
   type BatteryItem,
-  type BylineCard,
   type Cell,
   type DayIndex,
 } from './domain.ts'
@@ -39,130 +38,132 @@ export function sameCells(left: readonly Cell[], right: readonly Cell[]): boolea
   return key(left) === key(right)
 }
 
-/** Trend-card chrome for the spatial rotate item. Not a literacy byline. */
-const TREND: Omit<BylineCard, 'rotate'> = {
-  name: '#DETvsBUF',
-  outlet: 'US X trends',
-  time: 'Soft p.m.',
-}
-
-function trendCard(rotate: BylineCard['rotate']): BylineCard {
-  return { ...TREND, rotate }
-}
-
 /**
- * Soft day-1 from Wren XTRENDS table (cite-or-unknown).
+ * Soft day-1 = 9-item folded XTRENDS + Marlowe seeds (cite-or-unknown).
  * Factory path `/workspace/ixef-games/research/work-order-2026-09-17/CHRONO_FLASH_QUESTION_BANK_XTRENDS.md`
- * was not in this checkout. Literacy Soft and NEWS_BANK Fed/UN/YANOS pack are not this cut.
- * Never asks the DET–BUF final score (unknown).
+ * was not in this checkout. Literacy Soft is killed. DET-only short pack is replaced.
+ * Never asks the DET–BUF final score or a box score (unknown).
  */
 export const DAY1_ITEMS: readonly BatteryItem[] = [
   {
-    id: 'q1-verbal-detvsbuf-matchup',
+    id: 'q1-verbal-fed-range',
     family: 'verbal',
     kind: 'choice',
-    prompt: 'On US X trends, #DETvsBUF is which matchup?',
+    prompt: 'On 16 Sep 2026, the Fed federal funds target range was?',
     choices: [
-      { id: 'Bills at Lions', label: 'Buffalo Bills at Detroit Lions' },
-      { id: 'Lions at Bills', label: 'Detroit Lions at Buffalo Bills' },
-      { id: 'Lions at Chiefs', label: 'Detroit Lions at Kansas City Chiefs' },
-      { id: 'Cowboys at Bills', label: 'Dallas Cowboys at Buffalo Bills' },
+      { id: '3.25-3.50', label: '3.25%–3.50%' },
+      { id: '3.75-4.00', label: '3.75%–4.00%' },
+      { id: '4.25-4.50', label: '4.25%–4.50%' },
+      { id: '2.00-2.25', label: '2.00%–2.25%' },
     ],
-    answer: 'Lions at Bills',
+    answer: '3.75-4.00',
   },
   {
-    id: 'q2-verbal-highmark-venue',
-    family: 'verbal',
-    kind: 'choice',
-    prompt: 'Where is that #DETvsBUF game being played?',
-    choices: [
-      { id: 'Ford Field', label: 'Ford Field (Detroit)' },
-      { id: 'Arrowhead', label: 'Arrowhead Stadium (Kansas City)' },
-      { id: 'Highmark', label: 'Highmark Stadium (Orchard Park)' },
-      { id: 'MetLife', label: 'MetLife Stadium (East Rutherford)' },
-    ],
-    answer: 'Highmark',
-  },
-  {
-    id: 'q3-logic-josh-allen',
+    id: 'q2-logic-un-ffm-iran',
     family: 'logic',
     kind: 'choice',
-    prompt: 'Josh Allen is quarterback for which team?',
+    prompt:
+      'UN FFM: which state’s February strikes on a school/sports site in Iran had reasonable grounds for war crimes?',
     choices: [
-      { id: 'Lions', label: 'Detroit Lions' },
-      { id: 'Bills', label: 'Buffalo Bills' },
-      { id: 'Chiefs', label: 'Kansas City Chiefs' },
-      { id: 'Ravens', label: 'Baltimore Ravens' },
+      { id: 'Israel', label: 'Israel' },
+      { id: 'Iran', label: 'Iran' },
+      { id: 'United States', label: 'United States' },
+      { id: 'Russia', label: 'Russia' },
     ],
-    answer: 'Bills',
+    answer: 'United States',
   },
   {
-    id: 'q4-attention-dan-campbell',
+    id: 'q3-attention-yanos',
     family: 'attention',
     kind: 'choice',
-    prompt: 'Which name is on US X trends for this Soft evening?',
+    prompt: 'Which ≤72h event is real?',
     choices: [
-      { id: 'Belichick', label: 'Bill Belichick' },
-      { id: 'Campbell', label: 'Dan Campbell' },
-      { id: 'Brady', label: 'Tom Brady' },
-      { id: 'McVay', label: 'Sean McVay' },
+      { id: 'fed-zero', label: 'Fed cut the funds rate to 0%' },
+      { id: 'nato-admit', label: 'NATO admitted Ukraine' },
+      { id: 'yanos', label: 'Yaroslavl (YANOS) refinery halted processing after drone damage' },
+      { id: 'olympics-kyiv', label: 'Olympics opened in Kyiv' },
     ],
-    answer: 'Campbell',
+    answer: 'yanos',
   },
   {
-    id: 'q5-pattern-lions-cluster',
+    id: 'q4-pattern-yaroslavl-facility',
     family: 'pattern',
     kind: 'choice',
-    prompt: 'Which cluster is the Lions-side X-trends set?',
+    prompt: 'Drones → fires → facility class near Yaroslavl damaged?',
     choices: [
-      { id: 'bills-cluster', label: 'Allen · Cook · #BillsMafia · McDermott' },
-      { id: 'mixed-cluster', label: 'Goff · Allen · #DETvsBUF · Highmark' },
-      { id: 'lions-cluster', label: 'Goff · Gibbs · #OnePride · Dan Campbell' },
-      { id: 'nfl-cluster', label: 'Mahomes · Kelce · #ChiefsKingdom · Reid' },
+      { id: 'airport', label: 'Airport' },
+      { id: 'refinery', label: 'Oil refinery' },
+      { id: 'power', label: 'Power plant' },
+      { id: 'silo', label: 'Grain silo' },
     ],
-    answer: 'lions-cluster',
+    answer: 'refinery',
   },
   {
-    id: 'q6-memory-xtends-flash',
+    id: 'q5-memory-folded-flash',
     family: 'memory',
     kind: 'memory',
     prompt: 'Which set matches?',
-    flash: ['#DETvsBUF', 'Josh Allen', 'Goff', '#OnePride'],
+    flash: ['Fed', 'Kyiv', 'YANOS', 'Taif'],
     flashMs: MEMORY_FLASH_MS,
     choices: [
-      { id: 'match', label: '#DETvsBUF · Josh Allen · Goff · #OnePride' },
-      { id: 'swap-qbs', label: '#DETvsBUF · Goff · Josh Allen · #OnePride' },
-      { id: 'bills-swap', label: '#DETvsBUF · Josh Allen · Cook · #BillsMafia' },
-      { id: 'pride-swap', label: '#OnePride · Josh Allen · Goff · #DETvsBUF' },
+      { id: 'match', label: 'Fed · Kyiv · YANOS · Taif' },
+      { id: 'swap-kyiv', label: 'Fed · YANOS · Kyiv · Taif' },
+      { id: 'swap-taif', label: 'Fed · Kyiv · Taif · YANOS' },
+      { id: 'wrong-tag', label: 'Fed · Kyiv · YANOS · #DETvsBUF' },
     ],
     answer: 'match',
   },
   {
-    id: 'q7-verbal-flamengo-ww',
+    id: 'q6-verbal-detvsbuf-tag',
     family: 'verbal',
     kind: 'choice',
-    prompt: 'Which club is on the worldwide X trends list this Soft evening?',
+    prompt: 'Which NFL matchup tag dominated US X trends this Soft evening?',
     choices: [
-      { id: 'Real Madrid', label: 'Real Madrid' },
-      { id: 'Flamengo', label: 'Flamengo' },
-      { id: 'Manchester City', label: 'Manchester City' },
-      { id: 'Boca Juniors', label: 'Boca Juniors' },
+      { id: 'KCvsBAL', label: '#KCvsBAL' },
+      { id: 'DETvsBUF', label: '#DETvsBUF' },
+      { id: 'DALvsNYG', label: '#DALvsNYG' },
+      { id: 'NYvsNE', label: '#NYvsNE' },
     ],
-    answer: 'Flamengo',
+    answer: 'DETvsBUF',
   },
   {
-    id: 'q8-spatial-trend-rotate',
-    family: 'spatial',
-    kind: 'spatial',
-    prompt: 'Which trend card is the same card rotated 90° CW?',
-    promptByline: trendCard(0),
+    id: 'q7-verbal-sweden-pm',
+    family: 'verbal',
+    kind: 'choice',
+    prompt: 'Which Sweden PM resigned on 17 Sep?',
     choices: [
-      { id: 'rot-270', label: 'A', byline: trendCard(270) },
-      { id: 'rot-90', label: 'B', byline: trendCard(90) },
-      { id: 'rot-180', label: 'C', byline: trendCard(180) },
-      { id: 'rot-0', label: 'D', byline: trendCard(0) },
+      { id: 'Andersson', label: 'Magdalena Andersson' },
+      { id: 'Lofven', label: 'Stefan Löfven' },
+      { id: 'Kristersson', label: 'Ulf Kristersson' },
+      { id: 'Busch', label: 'Ebba Busch' },
     ],
-    answer: 'rot-90',
+    answer: 'Kristersson',
+  },
+  {
+    id: 'q8-attention-taif',
+    family: 'attention',
+    kind: 'choice',
+    prompt: 'Houthi debris caused a civilian death in which governorate?',
+    choices: [
+      { id: 'Riyadh', label: 'Riyadh' },
+      { id: 'Jeddah', label: 'Jeddah' },
+      { id: 'Taif', label: 'Taif' },
+      { id: 'Mecca', label: 'Mecca' },
+    ],
+    answer: 'Taif',
+  },
+  {
+    id: 'q9-verbal-josh-allen',
+    family: 'verbal',
+    kind: 'choice',
+    prompt: 'Which Bills QB is on US X trends this Soft evening?',
+    choices: [
+      { id: 'Goff', label: 'Jared Goff' },
+      { id: 'Allen', label: 'Josh Allen' },
+      { id: 'Mahomes', label: 'Patrick Mahomes' },
+      { id: 'Jackson', label: 'Lamar Jackson' },
+    ],
+    answer: 'Allen',
   },
 ]
 
