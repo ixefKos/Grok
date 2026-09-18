@@ -42,6 +42,7 @@ body {
 .kicker,
 .note,
 .lede,
+.mix,
 .progress {
   color: var(--muted);
 }
@@ -90,10 +91,17 @@ h1 {
 .lede,
 .prompt,
 .note,
+.mix,
 .progress,
 .score {
   margin: 0;
   text-align: center;
+}
+
+.mix {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
 }
 
 .progress {

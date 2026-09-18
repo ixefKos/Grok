@@ -10,11 +10,13 @@ import {
   formatShare,
   localDayKey,
   reduceSession,
+  skillFamilies,
   type BatteryItem,
   type Cell,
   type DayRecord,
   type Session,
 } from './domain.ts'
+import { SOFT_KICKER, SOFT_TIP, SOFT_TITLE } from './soft-label.ts'
 import { loadRecord, saveRecord } from './storage.ts'
 
 function shareUrl(): string {
@@ -207,9 +209,12 @@ export default function App() {
   return (
     <main className="shell">
       <header className="brand">
-        <p className="kicker">Daily IQ battery</p>
-        <h1>Chrono Flash</h1>
-        <p className="day">#{today.dayIndex}</p>
+        <p className="kicker">{dayLock ? 'Daily IQ battery' : SOFT_KICKER}</p>
+        <h1>{dayLock ? 'Chrono Flash' : SOFT_TITLE}</h1>
+        <p className="day">
+          #{today.dayIndex}
+          {dayLock ? null : ` · ${SOFT_TIP}`}
+        </p>
       </header>
 
       {session.status === 'home' ? (
@@ -219,6 +224,7 @@ export default function App() {
               ? 'Six mixed-skill items. One official timed run today. No practice retry.'
               : 'Six mixed-skill items. Soft replay on.'}
           </p>
+          <p className="mix">{skillFamilies(today.battery).join(' · ')}</p>
           {dayLock ? null : <p className="note">Soft · unlocked</p>}
           <button type="button" className="primary" onClick={start}>
             Start

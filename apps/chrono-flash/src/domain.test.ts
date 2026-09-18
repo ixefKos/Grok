@@ -73,6 +73,10 @@ describe('day-1 pack coverage', () => {
     assert.ok(families.includes('spatial'))
     assert.ok(families.includes('logic'))
     assert.ok(families.includes('memory'))
+    const mix = families.join(' · ')
+    assert.equal(mix.includes('pattern'), true)
+    assert.notEqual(mix, 'pattern')
+    assert.ok(mix.split(' · ').length >= 4)
   })
 
   it('implements the accepted day-1 prompts and keys verbatim', () => {
