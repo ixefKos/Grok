@@ -8,9 +8,10 @@ import {
   POST_TIME_INTENT,
   bootSession,
   buildPostTimeUrl,
-  allowSoftReset,
   canStart,
   dayIndexFor,
+  dayLockEnabled,
+  isSoftHost,
   elapsedMs,
   formatElapsed,
   formatShare,
@@ -23,7 +24,6 @@ import {
   type Battery,
   type Session,
 } from './domain.ts'
-import { STORAGE_KEY, clearRecord, loadRecord, saveRecord } from './storage.ts'
 
 const SHARE_URL = 'https://chrono-flash-xavierfouilleux-6035.vercel.app'
 const TODAY = '2026-09-17'
@@ -302,63 +302,37 @@ describe('storage boundary', () => {
   })
 })
 
-describe('soft reset day', () => {
+describe('soft host unlock', () => {
   const record = {
     dayKey: TODAY,
     dayIndex: 1 as const,
     outcome: { kind: 'dnf' as const, total: 6 },
   }
 
-  it('gates Reset day off a custom LIVE domain unless flagged', () => {
+  it('unlocks Soft hosts and keeps a custom LIVE domain locked', () => {
+    assert.equal(isSoftHost({ dev: false, hostname: 'chronoflash.example' }), false)
+    assert.equal(dayLockEnabled({ dev: false, hostname: 'chronoflash.example' }), true)
+    assert.equal(isSoftHost({ dev: false, hostname: 'chrono-flash.vercel.app' }), true)
+    assert.equal(dayLockEnabled({ dev: false, hostname: 'chrono-flash.vercel.app' }), false)
+    assert.equal(isSoftHost({ dev: false, hostname: 'localhost' }), true)
+    assert.equal(isSoftHost({ dev: false, hostname: '127.0.0.1' }), true)
+    assert.equal(isSoftHost({ dev: true, hostname: 'chronoflash.example' }), true)
     assert.equal(
-      allowSoftReset({ dev: false, hostname: 'chronoflash.example', search: '' }),
+      dayLockEnabled({ dev: false, hostname: 'chronoflash.example', envFlag: true }),
       false,
-    )
-    assert.equal(
-      allowSoftReset({ dev: false, hostname: 'chrono-flash.vercel.app', search: '' }),
-      true,
-    )
-    assert.equal(allowSoftReset({ dev: true, hostname: 'chronoflash.example', search: '' }), true)
-    assert.equal(
-      allowSoftReset({ dev: false, hostname: '127.0.0.1', search: '' }),
-      true,
-    )
-    assert.equal(
-      allowSoftReset({ dev: false, hostname: 'chronoflash.example', search: '?soft=1' }),
-      true,
-    )
-    assert.equal(
-      allowSoftReset({
-        dev: false,
-        hostname: 'chronoflash.example',
-        search: '',
-        envFlag: true,
-      }),
-      true,
     )
   })
 
-  it('clearing the record returns home with Start available', () => {
-    const store = new Map<string, string>()
-    const storage = {
-      getItem: (key: string) => store.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        store.set(key, value)
-      },
-      removeItem: (key: string) => {
-        store.delete(key)
-      },
-    } as Storage
-
-    saveRecord(storage, record)
-    assert.equal(store.has(STORAGE_KEY), true)
-    assert.equal(canStart(loadRecord(storage), TODAY), false)
-    assert.equal(bootSession(batteryForDay(1), loadRecord(storage), TODAY).status, 'result')
-
-    clearRecord(storage)
-    const cleared = loadRecord(storage)
-    assert.equal(cleared, null)
-    assert.equal(canStart(cleared, TODAY), true)
-    assert.equal(bootSession(batteryForDay(1), cleared, TODAY).status, 'home')
+  it('boots Home with Start when day-lock is off even if today is recorded', () => {
+    assert.equal(canStart(record, TODAY, false), true)
+    const session = bootSession(batteryForDay(1), record, TODAY, false)
+    assert.equal(session.status, 'home')
+    const started = reduceSession(session, {
+      type: 'start',
+      startedAt: 1,
+      todayKey: TODAY,
+      dayLock: false,
+    })
+    assert.equal(started.status, 'playing')
   })
 })

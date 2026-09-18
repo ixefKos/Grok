@@ -209,10 +209,6 @@ button {
   background: var(--card);
 }
 
-.reset-day {
-  width: 100%;
-}
-
 .shape-board {
   display: grid;
   gap: 3px;

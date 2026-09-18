@@ -1,6 +1,6 @@
 # Chrono Flash
 
-Throwaway English-first daily IQ battery. Soft retry off. HOLD LIVE.
+Throwaway English-first daily IQ battery. Soft retry off on LIVE. Soft preview is unlocked — see `SOFT_UNLOCK.md`. HOLD LIVE.
 
 ## Loop
 

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { batteryForDay } from './battery.ts'
 import {
-  allowSoftReset,
-  buildPostTimeUrl,
   bootSession,
+  buildPostTimeUrl,
   dayIndexFor,
+  dayLockEnabled,
   elapsedMs,
   formatElapsed,
   formatShare,
@@ -15,18 +15,17 @@ import {
   type DayRecord,
   type Session,
 } from './domain.ts'
-import { clearRecord, loadRecord, saveRecord } from './storage.ts'
+import { loadRecord, saveRecord } from './storage.ts'
 
 function shareUrl(): string {
   return window.location.origin + window.location.pathname
 }
 
-function softResetEnabled(): boolean {
-  return allowSoftReset({
+function hostDayLock(): boolean {
+  return dayLockEnabled({
     dev: import.meta.env.DEV,
     hostname: window.location.hostname,
-    search: window.location.search,
-    envFlag: import.meta.env.VITE_SOFT_RESET === '1',
+    envFlag: import.meta.env.VITE_SOFT_UNLOCK === '1',
   })
 }
 
@@ -96,8 +95,9 @@ function ItemPrompt({ item, memoryReady }: { item: BatteryItem; memoryReady: boo
 
 export default function App() {
   const today = useMemo(() => todayParts(), [])
+  const dayLock = hostDayLock()
   const [session, setSession] = useState<Session>(() =>
-    bootSession(today.battery, loadRecord(window.localStorage), today.dayKey),
+    bootSession(today.battery, loadRecord(window.localStorage), today.dayKey, dayLock),
   )
   const [nowMs, setNowMs] = useState(() => performance.now())
   const [fallbackCopied, setFallbackCopied] = useState(false)
@@ -120,8 +120,9 @@ export default function App() {
   }, [session.status])
 
   useEffect(() => {
+    if (!dayLock) return
     persistResult(session, today.dayKey)
-  }, [session, today.dayKey])
+  }, [dayLock, session, today.dayKey])
 
   const liveElapsed =
     session.status === 'playing' ? elapsedMs(session.startedAt, nowMs) : 0
@@ -138,6 +139,7 @@ export default function App() {
         type: 'start',
         startedAt: mark,
         todayKey: today.dayKey,
+        dayLock,
       }),
     )
   }
@@ -163,12 +165,6 @@ export default function App() {
 
   function giveUp() {
     setSession((currentSession) => reduceSession(currentSession, { type: 'dnf' }))
-  }
-
-  function resetDay() {
-    clearRecord(window.localStorage)
-    setFallbackCopied(false)
-    setSession(bootSession(today.battery, null, today.dayKey))
   }
 
   async function copyFallback(text: string) {
@@ -219,8 +215,11 @@ export default function App() {
       {session.status === 'home' ? (
         <section className="card">
           <p className="lede">
-            Six mixed-skill items. One official timed run today. No practice retry.
+            {dayLock
+              ? 'Six mixed-skill items. One official timed run today. No practice retry.'
+              : 'Six mixed-skill items. Soft replay on.'}
           </p>
+          {dayLock ? null : <p className="note">Soft · unlocked</p>}
           <button type="button" className="primary" onClick={start}>
             Start
           </button>
@@ -288,13 +287,10 @@ export default function App() {
           {fallbackCopied ? (
             <p className="note">Intent blocked. Score card copied as a fallback.</p>
           ) : (
-            <p className="note">Come back tomorrow for the next battery.</p>
+            <p className="note">
+              {dayLock ? 'Come back tomorrow for the next battery.' : 'Soft · unlocked. Reload to run again.'}
+            </p>
           )}
-          {softResetEnabled() ? (
-            <button type="button" className="ghost reset-day" onClick={resetDay}>
-              Reset day
-            </button>
-          ) : null}
         </section>
       ) : null}
     </main>

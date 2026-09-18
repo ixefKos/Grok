@@ -57,9 +57,15 @@ export type Session =
   | { status: 'result'; battery: Battery; outcome: Outcome }
 
 export type SessionEvent =
-  | { type: 'start'; startedAt: number; todayKey: string }
+  | { type: 'start'; startedAt: number; todayKey: string; dayLock?: boolean }
   | { type: 'answer'; choice: string; elapsedMs: number }
   | { type: 'dnf' }
+
+export type HostGate = {
+  dev: boolean
+  hostname: string
+  envFlag?: boolean
+}
 
 export const PACK_EPOCH = { year: 2026, monthIndex: 8, day: 17 } as const
 export const PACK_SIZE = 7
@@ -84,35 +90,36 @@ export function dayIndexFor(date: Date): DayIndex {
   return (((((days % PACK_SIZE) + PACK_SIZE) % PACK_SIZE) + 1) as DayIndex)
 }
 
-export function canStart(record: DayRecord | null, todayKey: string): boolean {
+export function canStart(
+  record: DayRecord | null,
+  todayKey: string,
+  dayLock = true,
+): boolean {
+  if (!dayLock) return true
   return record === null || record.dayKey !== todayKey
 }
 
-/** Soft/dev Reset day only: DEV, vercel.app/localhost, ?soft=1, or VITE_SOFT_RESET=1 — hidden on a custom LIVE domain. */
-export function allowSoftReset(input: {
-  dev: boolean
-  hostname: string
-  search: string
-  envFlag?: boolean
-}): boolean {
+/** Soft preview only (*.vercel.app / localhost / DEV / VITE_SOFT_UNLOCK=1). LIVE custom domain must stay locked — do not merge LIVE with day-lock OFF. */
+export function isSoftHost(input: HostGate): boolean {
   if (input.dev || input.envFlag) return true
   const host = input.hostname.toLowerCase()
-  if (host.includes('vercel.app') || host.includes('localhost') || host === '127.0.0.1' || host === '[::1]') {
-    return true
-  }
-  const query = input.search.startsWith('?') ? input.search.slice(1) : input.search
-  return new URLSearchParams(query).get('soft') === '1'
+  return host.endsWith('.vercel.app') || host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
+}
+
+export function dayLockEnabled(input: HostGate): boolean {
+  return !isSoftHost(input)
 }
 
 export function bootSession(
   battery: Battery,
   record: DayRecord | null,
   todayKey: string,
+  dayLock = true,
 ): Session {
-  if (record && record.dayKey === todayKey) {
+  if (dayLock && record && record.dayKey === todayKey) {
     return { status: 'result', battery, outcome: record.outcome }
   }
-  return { status: 'home', battery, record }
+  return { status: 'home', battery, record: dayLock ? record : null }
 }
 
 export function scoreAnswers(battery: Battery, answers: readonly string[]): number {
@@ -129,7 +136,7 @@ export function skillFamilies(battery: Battery): SkillFamily[] {
 export function reduceSession(session: Session, event: SessionEvent): Session {
   switch (session.status) {
     case 'home':
-      if (event.type === 'start' && canStart(session.record, event.todayKey)) {
+      if (event.type === 'start' && canStart(session.record, event.todayKey, event.dayLock ?? true)) {
         return {
           status: 'playing',
           battery: session.battery,
