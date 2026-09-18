@@ -52,21 +52,51 @@ function cellKey(cell: Cell): string {
   return `${cell[0]},${cell[1]}`
 }
 
+const SHAPE_CELL_PX = 18
+const SHAPE_GAP_PX = 3
+
+function shapeBoardSize(count: number): number {
+  return count * SHAPE_CELL_PX + Math.max(0, count - 1) * SHAPE_GAP_PX
+}
+
 function ShapeGrid({ cells }: { cells: readonly Cell[] }) {
   const rows = Math.max(3, ...cells.map(([row]) => row + 1))
   const cols = Math.max(3, ...cells.map(([, col]) => col + 1))
   const filled = new Set(cells.map(cellKey))
+  const width = shapeBoardSize(cols)
+  const height = shapeBoardSize(rows)
   return (
     <div
       className="shape-board"
-      style={{ gridTemplateColumns: `repeat(${cols}, 1.15rem)` }}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${cols}, ${SHAPE_CELL_PX}px)`,
+        gridTemplateRows: `repeat(${rows}, ${SHAPE_CELL_PX}px)`,
+        gap: SHAPE_GAP_PX,
+        width,
+        height,
+        minWidth: width,
+        minHeight: height,
+      }}
       aria-hidden="true"
     >
       {Array.from({ length: rows * cols }, (_, index) => {
         const row = Math.floor(index / cols)
         const col = index % cols
         const on = filled.has(`${row},${col}`)
-        return <span key={`${row}-${col}`} className={on ? 'shape-cell on' : 'shape-cell'} />
+        return (
+          <span
+            key={`${row}-${col}`}
+            className={on ? 'shape-cell on' : 'shape-cell'}
+            style={{
+              display: 'block',
+              width: SHAPE_CELL_PX,
+              height: SHAPE_CELL_PX,
+              minWidth: SHAPE_CELL_PX,
+              minHeight: SHAPE_CELL_PX,
+            }}
+          />
+        )
       })}
     </div>
   )

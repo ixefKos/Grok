@@ -221,14 +221,23 @@ button {
   display: grid;
   gap: 3px;
   justify-content: center;
+  flex-shrink: 0;
+  min-width: 3.6rem;
+  min-height: 3.6rem;
+  grid-auto-columns: 1.15rem;
+  grid-auto-rows: 1.15rem;
 }
 
 .shape-cell {
-  width: 1rem;
-  height: 1rem;
+  display: block;
+  width: 1.15rem;
+  height: 1.15rem;
+  min-width: 1.15rem;
+  min-height: 1.15rem;
+  flex-shrink: 0;
   border-radius: 3px;
-  background: transparent;
-  border: 1px solid transparent;
+  background: #12141a;
+  border: 1px solid var(--line);
 }
 
 .shape-cell.on {
