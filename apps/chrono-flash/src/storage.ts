@@ -15,3 +15,7 @@ export function loadRecord(storage: Storage): DayRecord | null {
 export function saveRecord(storage: Storage, record: DayRecord): void {
   storage.setItem(STORAGE_KEY, JSON.stringify(record))
 }
+
+export function clearRecord(storage: Storage): void {
+  storage.removeItem(STORAGE_KEY)
+}

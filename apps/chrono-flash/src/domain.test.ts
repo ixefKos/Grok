@@ -8,6 +8,7 @@ import {
   POST_TIME_INTENT,
   bootSession,
   buildPostTimeUrl,
+  allowSoftReset,
   canStart,
   dayIndexFor,
   elapsedMs,
@@ -22,6 +23,7 @@ import {
   type Battery,
   type Session,
 } from './domain.ts'
+import { STORAGE_KEY, clearRecord, loadRecord, saveRecord } from './storage.ts'
 
 const SHARE_URL = 'https://chrono-flash-xavierfouilleux-6035.vercel.app'
 const TODAY = '2026-09-17'
@@ -297,5 +299,66 @@ describe('storage boundary', () => {
       dayIndex: 1,
       outcome: { kind: 'solved', elapsedMs: 8800, correct: 4, total: 6 },
     })
+  })
+})
+
+describe('soft reset day', () => {
+  const record = {
+    dayKey: TODAY,
+    dayIndex: 1 as const,
+    outcome: { kind: 'dnf' as const, total: 6 },
+  }
+
+  it('gates Reset day off a custom LIVE domain unless flagged', () => {
+    assert.equal(
+      allowSoftReset({ dev: false, hostname: 'chronoflash.example', search: '' }),
+      false,
+    )
+    assert.equal(
+      allowSoftReset({ dev: false, hostname: 'chrono-flash.vercel.app', search: '' }),
+      true,
+    )
+    assert.equal(allowSoftReset({ dev: true, hostname: 'chronoflash.example', search: '' }), true)
+    assert.equal(
+      allowSoftReset({ dev: false, hostname: '127.0.0.1', search: '' }),
+      true,
+    )
+    assert.equal(
+      allowSoftReset({ dev: false, hostname: 'chronoflash.example', search: '?soft=1' }),
+      true,
+    )
+    assert.equal(
+      allowSoftReset({
+        dev: false,
+        hostname: 'chronoflash.example',
+        search: '',
+        envFlag: true,
+      }),
+      true,
+    )
+  })
+
+  it('clearing the record returns home with Start available', () => {
+    const store = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value)
+      },
+      removeItem: (key: string) => {
+        store.delete(key)
+      },
+    } as Storage
+
+    saveRecord(storage, record)
+    assert.equal(store.has(STORAGE_KEY), true)
+    assert.equal(canStart(loadRecord(storage), TODAY), false)
+    assert.equal(bootSession(batteryForDay(1), loadRecord(storage), TODAY).status, 'result')
+
+    clearRecord(storage)
+    const cleared = loadRecord(storage)
+    assert.equal(cleared, null)
+    assert.equal(canStart(cleared, TODAY), true)
+    assert.equal(bootSession(batteryForDay(1), cleared, TODAY).status, 'home')
   })
 })

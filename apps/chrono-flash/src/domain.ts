@@ -88,6 +88,22 @@ export function canStart(record: DayRecord | null, todayKey: string): boolean {
   return record === null || record.dayKey !== todayKey
 }
 
+/** Soft/dev Reset day only: DEV, vercel.app/localhost, ?soft=1, or VITE_SOFT_RESET=1 — hidden on a custom LIVE domain. */
+export function allowSoftReset(input: {
+  dev: boolean
+  hostname: string
+  search: string
+  envFlag?: boolean
+}): boolean {
+  if (input.dev || input.envFlag) return true
+  const host = input.hostname.toLowerCase()
+  if (host.includes('vercel.app') || host.includes('localhost') || host === '127.0.0.1' || host === '[::1]') {
+    return true
+  }
+  const query = input.search.startsWith('?') ? input.search.slice(1) : input.search
+  return new URLSearchParams(query).get('soft') === '1'
+}
+
 export function bootSession(
   battery: Battery,
   record: DayRecord | null,

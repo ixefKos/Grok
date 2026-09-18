@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { batteryForDay } from './battery.ts'
 import {
+  allowSoftReset,
   buildPostTimeUrl,
   bootSession,
   dayIndexFor,
@@ -14,10 +15,19 @@ import {
   type DayRecord,
   type Session,
 } from './domain.ts'
-import { loadRecord, saveRecord } from './storage.ts'
+import { clearRecord, loadRecord, saveRecord } from './storage.ts'
 
 function shareUrl(): string {
   return window.location.origin + window.location.pathname
+}
+
+function softResetEnabled(): boolean {
+  return allowSoftReset({
+    dev: import.meta.env.DEV,
+    hostname: window.location.hostname,
+    search: window.location.search,
+    envFlag: import.meta.env.VITE_SOFT_RESET === '1',
+  })
 }
 
 function todayParts(now = new Date()) {
@@ -155,6 +165,12 @@ export default function App() {
     setSession((currentSession) => reduceSession(currentSession, { type: 'dnf' }))
   }
 
+  function resetDay() {
+    clearRecord(window.localStorage)
+    setFallbackCopied(false)
+    setSession(bootSession(today.battery, null, today.dayKey))
+  }
+
   async function copyFallback(text: string) {
     try {
       await navigator.clipboard.writeText(text)
@@ -274,6 +290,11 @@ export default function App() {
           ) : (
             <p className="note">Come back tomorrow for the next battery.</p>
           )}
+          {softResetEnabled() ? (
+            <button type="button" className="ghost reset-day" onClick={resetDay}>
+              Reset day
+            </button>
+          ) : null}
         </section>
       ) : null}
     </main>
