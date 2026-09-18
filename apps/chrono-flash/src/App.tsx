@@ -3,6 +3,7 @@ import { batteryForDay } from './battery.ts'
 import {
   bootSession,
   buildPostTimeUrl,
+  openPostTimeIntent,
   dayIndexFor,
   dayLockEnabled,
   isSoftHost,
@@ -303,8 +304,8 @@ export default function App() {
       url: shareUrl(),
     })
     const intent = buildPostTimeUrl(text)
-    const popup = window.open(intent, '_blank', 'noopener,noreferrer')
-    if (popup == null) {
+    const opened = openPostTimeIntent((url, target) => window.open(url, target), intent)
+    if (!opened) {
       void copyFallback(text)
     }
   }
@@ -405,6 +406,12 @@ export default function App() {
             <p className="note">Come back tomorrow for the next battery.</p>
           )}
         </section>
+      ) : null}
+
+      {softLabel ? (
+        <footer className="tip-foot" aria-label="Soft tip SHA">
+          {SOFT_TIP}
+        </footer>
       ) : null}
     </main>
   )

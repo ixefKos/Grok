@@ -226,6 +226,30 @@ export function buildPostTimeUrl(text: string): string {
   return `${POST_TIME_INTENT}?text=${encodeURIComponent(text)}`
 }
 
+export type IntentPopup = {
+  opener: unknown
+}
+
+/**
+ * Open X compose in a new tab. Do not pass a features string — `noopener`
+ * in features makes `window.open` return null even when the tab opened,
+ * which falsely trips the clipboard fallback.
+ * A null handle means the popup was actually blocked.
+ */
+export function openPostTimeIntent(
+  openWindow: (url: string, target: string) => IntentPopup | null,
+  url: string,
+): boolean {
+  try {
+    const popup = openWindow(url, '_blank')
+    if (popup == null) return false
+    popup.opener = null
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function isCanonicalShare(
   paste: string,
   dayIndex: DayIndex,

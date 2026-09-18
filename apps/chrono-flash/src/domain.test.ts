@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DAY1_ITEMS, batteryForDay } from './battery.ts'
+import { shortTipSha } from './soft-label.ts'
 import {
   MIN_FAMILIES,
   MIN_ITEMS,
@@ -8,6 +9,7 @@ import {
   POST_TIME_INTENT,
   bootSession,
   buildPostTimeUrl,
+  openPostTimeIntent,
   canStart,
   dayIndexFor,
   dayLockEnabled,
@@ -348,6 +350,40 @@ describe('share unit', () => {
     assert.equal(intent.startsWith(`${POST_TIME_INTENT}?text=`), true)
     assert.equal(decodeURIComponent(intent.slice(`${POST_TIME_INTENT}?text=`.length)), paste)
     assert.equal(intent.toLowerCase().includes('copy'), false)
+  })
+
+  it('opens X intent without a features string and does not treat a handle as blocked', () => {
+    const intent = buildPostTimeUrl('Chrono Flash #1\nScore 9/9 · 0:00:04\nhttps://example.test')
+    const calls: unknown[] = []
+    const popup = { opener: 'parent' as unknown }
+    const opened = openPostTimeIntent((url, target) => {
+      calls.push([url, target])
+      return popup
+    }, intent)
+    assert.equal(opened, true)
+    assert.equal(popup.opener, null)
+    assert.deepEqual(calls, [[intent, '_blank']])
+  })
+
+  it('uses clipboard fallback only when the popup handle is actually null', () => {
+    const opened = openPostTimeIntent(() => null, `${POST_TIME_INTENT}?text=x`)
+    assert.equal(opened, false)
+  })
+
+  it('treats a thrown window.open as a true block', () => {
+    const opened = openPostTimeIntent(() => {
+      throw new Error('blocked')
+    }, `${POST_TIME_INTENT}?text=x`)
+    assert.equal(opened, false)
+  })
+})
+
+describe('soft tip SHA', () => {
+  it('shortens a full commit SHA to 7 chars for the Soft home/footer', () => {
+    assert.equal(shortTipSha('30759f5c0ffeebad'), '30759f5')
+    assert.equal(shortTipSha('30759f5'), '30759f5')
+    assert.equal(shortTipSha(''), 'unknown')
+    assert.equal(shortTipSha(undefined), 'unknown')
   })
 })
 

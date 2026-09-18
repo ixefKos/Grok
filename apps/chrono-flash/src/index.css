@@ -280,6 +280,15 @@ button {
   text-align: left;
 }
 
+.tip-foot {
+  margin: 1.35rem 0 0;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
 @media (max-width: 420px) {
   .choices:not(.spatial) {
     grid-template-columns: 1fr;
