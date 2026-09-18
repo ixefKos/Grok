@@ -1,16 +1,43 @@
 export type DayIndex = 1 | 2 | 3 | 4 | 5 | 6 | 7
 
-export type Puzzle = {
-  day: DayIndex
+export type SkillFamily =
+  | 'pattern'
+  | 'spatial'
+  | 'verbal'
+  | 'logic'
+  | 'memory'
+  | 'attention'
+
+export type Cell = readonly [row: number, col: number]
+
+export type Choice = {
+  id: string
+  label: string
+  shape?: readonly Cell[]
+}
+
+export type ItemKind = 'choice' | 'spatial' | 'memory'
+
+export type BatteryItem = {
+  id: string
+  family: SkillFamily
+  kind: ItemKind
   prompt: string
-  items: readonly string[]
-  choices: readonly string[]
+  choices: readonly Choice[]
   answer: string
+  flash?: readonly string[]
+  flashMs?: number
+  promptShape?: readonly Cell[]
+}
+
+export type Battery = {
+  day: DayIndex
+  items: readonly BatteryItem[]
 }
 
 export type Outcome =
-  | { kind: 'solved'; elapsedMs: number }
-  | { kind: 'dnf' }
+  | { kind: 'solved'; elapsedMs: number; correct: number; total: number }
+  | { kind: 'dnf'; total: number }
 
 export type DayRecord = {
   dayKey: string
@@ -19,17 +46,29 @@ export type DayRecord = {
 }
 
 export type Session =
-  | { status: 'home'; puzzle: Puzzle; record: DayRecord | null }
-  | { status: 'playing'; puzzle: Puzzle; startedAt: number }
-  | { status: 'result'; puzzle: Puzzle; outcome: Outcome }
+  | { status: 'home'; battery: Battery; record: DayRecord | null }
+  | {
+      status: 'playing'
+      battery: Battery
+      startedAt: number
+      index: number
+      answers: readonly string[]
+    }
+  | { status: 'result'; battery: Battery; outcome: Outcome }
 
 export type SessionEvent =
   | { type: 'start'; startedAt: number; todayKey: string }
-  | { type: 'solve'; elapsedMs: number }
+  | { type: 'answer'; choice: string; elapsedMs: number }
   | { type: 'dnf' }
 
 export const PACK_EPOCH = { year: 2026, monthIndex: 8, day: 17 } as const
 export const PACK_SIZE = 7
+export const MIN_ITEMS = 6
+export const MIN_FAMILIES = 4
+export const MEMORY_FLASH_MS = 2500
+export const SHARE_DOT = '·'
+export const DNF_MARK = '—'
+export const POST_TIME_INTENT = 'https://twitter.com/intent/tweet'
 
 export function localDayKey(date: Date): string {
   const year = date.getFullYear()
@@ -50,33 +89,71 @@ export function canStart(record: DayRecord | null, todayKey: string): boolean {
 }
 
 export function bootSession(
-  puzzle: Puzzle,
+  battery: Battery,
   record: DayRecord | null,
   todayKey: string,
 ): Session {
   if (record && record.dayKey === todayKey) {
-    return { status: 'result', puzzle, outcome: record.outcome }
+    return { status: 'result', battery, outcome: record.outcome }
   }
-  return { status: 'home', puzzle, record }
+  return { status: 'home', battery, record }
+}
+
+export function scoreAnswers(battery: Battery, answers: readonly string[]): number {
+  return battery.items.reduce(
+    (count, item, index) => count + (answers[index] === item.answer ? 1 : 0),
+    0,
+  )
+}
+
+export function skillFamilies(battery: Battery): SkillFamily[] {
+  return [...new Set(battery.items.map((item) => item.family))]
 }
 
 export function reduceSession(session: Session, event: SessionEvent): Session {
   switch (session.status) {
     case 'home':
       if (event.type === 'start' && canStart(session.record, event.todayKey)) {
-        return { status: 'playing', puzzle: session.puzzle, startedAt: event.startedAt }
+        return {
+          status: 'playing',
+          battery: session.battery,
+          startedAt: event.startedAt,
+          index: 0,
+          answers: [],
+        }
       }
       return session
     case 'playing':
-      if (event.type === 'solve') {
+      if (event.type === 'answer') {
+        const item = session.battery.items[session.index]
+        if (!item || session.answers.length !== session.index) return session
+        const answers = [...session.answers, event.choice]
+        if (answers.length >= session.battery.items.length) {
+          return {
+            status: 'result',
+            battery: session.battery,
+            outcome: {
+              kind: 'solved',
+              elapsedMs: Math.max(0, Math.round(event.elapsedMs)),
+              correct: scoreAnswers(session.battery, answers),
+              total: session.battery.items.length,
+            },
+          }
+        }
         return {
-          status: 'result',
-          puzzle: session.puzzle,
-          outcome: { kind: 'solved', elapsedMs: Math.max(0, Math.round(event.elapsedMs)) },
+          status: 'playing',
+          battery: session.battery,
+          startedAt: session.startedAt,
+          index: session.index + 1,
+          answers,
         }
       }
       if (event.type === 'dnf') {
-        return { status: 'result', puzzle: session.puzzle, outcome: { kind: 'dnf' } }
+        return {
+          status: 'result',
+          battery: session.battery,
+          outcome: { kind: 'dnf', total: session.battery.items.length },
+        }
       }
       return session
     case 'result':
@@ -96,25 +173,38 @@ export function formatElapsed(ms: number): string {
   return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
+export function formatScoreLine(outcome: Outcome): string {
+  if (outcome.kind === 'dnf') {
+    return `Score ${DNF_MARK}/${outcome.total} ${SHARE_DOT} DNF`
+  }
+  return `Score ${outcome.correct}/${outcome.total} ${SHARE_DOT} ${formatElapsed(outcome.elapsedMs)}`
+}
+
 export function formatShare(input: {
   dayIndex: DayIndex
   outcome: Outcome
   url: string
 }): string {
-  const timeLine =
-    input.outcome.kind === 'solved' ? formatElapsed(input.outcome.elapsedMs) : 'DNF'
-  return `Chrono Flash #${input.dayIndex}\n${timeLine}\n${input.url}`
+  return `Chrono Flash #${input.dayIndex}\n${formatScoreLine(input.outcome)}\n${input.url}`
+}
+
+export function buildPostTimeUrl(text: string): string {
+  return `${POST_TIME_INTENT}?text=${encodeURIComponent(text)}`
 }
 
 export function isCanonicalShare(
   paste: string,
   dayIndex: DayIndex,
   url: string,
+  total: number,
 ): boolean {
   const lines = paste.split('\n')
   if (lines.length !== 3) return false
   if (lines[0] !== `Chrono Flash #${dayIndex}`) return false
-  if (lines[1] !== 'DNF' && !/^\d+:\d{2}:\d{2}$/.test(lines[1])) return false
+  const solved = new RegExp(`^Score \\d+/${total} ${SHARE_DOT} \\d+:\\d{2}:\\d{2}$`)
+  const dnf = `Score ${DNF_MARK}/${total} ${SHARE_DOT} DNF`
+  if (lines[1] !== dnf && !solved.test(lines[1])) return false
+  if (lines[1].includes('DNF') && lines[1].includes('0:00:00')) return false
   return lines[2] === url
 }
 
@@ -144,9 +234,32 @@ export function parseDayRecord(raw: unknown): DayRecord | null {
 function parseOutcome(raw: unknown): Outcome | null {
   if (raw === null || typeof raw !== 'object') return null
   const value = raw as Record<string, unknown>
-  if (value.kind === 'dnf') return { kind: 'dnf' }
-  if (value.kind === 'solved' && typeof value.elapsedMs === 'number' && Number.isFinite(value.elapsedMs)) {
-    return { kind: 'solved', elapsedMs: Math.max(0, Math.round(value.elapsedMs)) }
+  if (
+    value.kind === 'dnf' &&
+    typeof value.total === 'number' &&
+    Number.isInteger(value.total) &&
+    value.total >= MIN_ITEMS
+  ) {
+    return { kind: 'dnf', total: value.total }
+  }
+  if (
+    value.kind === 'solved' &&
+    typeof value.elapsedMs === 'number' &&
+    Number.isFinite(value.elapsedMs) &&
+    typeof value.correct === 'number' &&
+    Number.isInteger(value.correct) &&
+    value.correct >= 0 &&
+    typeof value.total === 'number' &&
+    Number.isInteger(value.total) &&
+    value.total >= MIN_ITEMS &&
+    value.correct <= value.total
+  ) {
+    return {
+      kind: 'solved',
+      elapsedMs: Math.max(0, Math.round(value.elapsedMs)),
+      correct: value.correct,
+      total: value.total,
+    }
   }
   return null
 }

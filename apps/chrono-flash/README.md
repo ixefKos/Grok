@@ -1,12 +1,12 @@
 # Chrono Flash
 
-Throwaway English-first daily pattern probe. Path A lean.
+Throwaway English-first daily IQ battery. Soft retry off. HOLD LIVE.
 
 ## Loop
 
-Start, solve today's sequence, copy a time-only card.
+Start, clear today's six mixed-skill items, tap **Post time** to open a prefilled X compose.
 
-Soft retry is off. One official timed run per local day. Give up records `DNF` and does not invent a fast time.
+One official timed run per local day. Give up records `Score —/B · DNF` and does not invent `0:00:00`.
 
 ## Run
 
@@ -18,14 +18,24 @@ npm run dev
 
 ## Pack
 
-Seven static pattern/sequence puzzles live in `src/puzzles.ts`. Day index 1 starts on 2026-09-17 and cycles.
+Day-1 ships 6 items across 5 families (pattern, verbal, spatial, logic, memory) in `src/battery.ts`. Later days reuse that pack until more days are authored. Day index 1 starts on 2026-09-17.
 
 ## Share
 
+Primary CTA is **Post time** → `https://twitter.com/intent/tweet?text=…`.
+
 ```
 Chrono Flash #N
-0:MM:SS
+Score A/B · 0:MM:SS
 <deploy-url>
 ```
 
-The paste has no solution and no puzzle body.
+DNF:
+
+```
+Chrono Flash #N
+Score —/B · DNF
+<deploy-url>
+```
+
+No question text and no answers. Clipboard copy is fallback only if the intent is blocked.

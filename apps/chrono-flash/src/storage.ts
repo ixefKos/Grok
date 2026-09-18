@@ -1,6 +1,6 @@
 import { parseDayRecord, type DayRecord } from './domain.ts'
 
-export const STORAGE_KEY = 'chrono-flash:v0:record'
+export const STORAGE_KEY = 'chrono-flash:v1:battery'
 
 export function loadRecord(storage: Storage): DayRecord | null {
   try {

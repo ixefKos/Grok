@@ -1,7 +1,7 @@
 {
   "name": "Chrono Flash",
   "short_name": "Chrono Flash",
-  "description": "One daily pattern. One official time.",
+  "description": "One daily IQ battery. One official score and time.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
