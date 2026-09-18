@@ -110,15 +110,17 @@ export function canStart(
   return record === null || record.dayKey !== todayKey
 }
 
-/** Soft preview only (*.vercel.app / localhost / DEV / VITE_SOFT_UNLOCK=1). LIVE custom domain stays locked. Day-lock restore is deferred until X-trends Soft Ready. */
+/** Soft preview labels only (*.vercel.app / localhost / DEV / VITE_SOFT_UNLOCK=1). Day-lock is ON for every host. */
 export function isSoftHost(input: HostGate): boolean {
   if (input.dev || input.envFlag) return true
   const host = input.hostname.toLowerCase()
   return host.endsWith('.vercel.app') || host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
 }
 
+/** One official run per local day on Soft and LIVE. Soft unlock is OFF. */
 export function dayLockEnabled(input: HostGate): boolean {
-  return !isSoftHost(input)
+  void input
+  return true
 }
 
 export function bootSession(

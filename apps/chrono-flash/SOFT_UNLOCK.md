@@ -1,17 +1,20 @@
-# Soft unlock · ON (X-trends Soft)
+# Soft unlock · OFF (day-lock restored)
 
-Soft unlock is **ON** for Soft tests: `dayLockEnabled() === false` on `*.vercel.app` / localhost / DEV / `VITE_SOFT_UNLOCK=1`. `bootSession` returns Home with Start. Reload after a run does not stick the score card.
+Soft unlock is **OFF**. `dayLockEnabled()` is **true** on Soft alias hosts (`*.vercel.app` / localhost / DEV) and on a future LIVE domain. One official run per local day. After Result, reload stays on the locked score card. Start is gone until the local day key changes.
 
-Literacy Soft is **killed**. DET-only short pack is **replaced**. This Soft day-1 is the revised **9-item** Wren XTRENDS table with Marlowe seeds folded (Fed / UN / YANOS / Taif / Sweden PM / #DETvsBUF / Josh Allen). Day-lock restore is **not** this cut.
+`isSoftHost()` is labels-only: Home stays **Chrono Flash · News Soft (X trends)**.
 
-`dayLockEnabled()` stays **ON** for any other host (a future public LIVE domain). Do not merge LIVE with day-lock OFF.
+Literacy Soft stays **killed**. Soft day-1 is the **9-item** Wren XTRENDS table with Marlowe seeds folded. Post time: Intent-blocked only when `window.open` is truly blocked. Home/footer SHA is `VITE_GIT_SHA`.
+
+Do not merge LIVE until product GO.
 
 ## Soft check
 
-1. Play → result → reload → Start available again.
+1. Play → result → reload → Start gone (locked result).
 2. DNF ≠ `0:00:00`.
 3. **Post time** opens the X intent (Score A/B · time · URL) and does **not** show “Intent blocked” when the compose tab opened. Clipboard fallback only if the popup is actually blocked.
-4. Home **Chrono Flash · News Soft (X trends)**. Home/footer SHA is `VITE_GIT_SHA` / `VERCEL_GIT_COMMIT_SHA` / `git rev-parse HEAD` (short), not a stamped leftover.
+4. Home **Chrono Flash · News Soft (X trends)**. Home/footer SHA is the shipped tip short SHA.
 5. Never asks the DET–BUF final score or a box score.
+6. Clear localStorage / new day key allows a new official run.
 
 HOLD LIVE · do not merge until product GO.

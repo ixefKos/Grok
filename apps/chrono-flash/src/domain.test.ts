@@ -423,38 +423,43 @@ describe('storage boundary', () => {
   })
 })
 
-describe('soft host unlock', () => {
+describe('soft host day-lock', () => {
   const record = {
     dayKey: TODAY,
     dayIndex: 1 as const,
     outcome: { kind: 'dnf' as const, total: 9 },
   }
 
-  it('unlocks Soft hosts and keeps a custom LIVE domain locked', () => {
+  it('locks Soft preview hosts and LIVE domains', () => {
     assert.equal(isSoftHost({ dev: false, hostname: 'chronoflash.example' }), false)
     assert.equal(dayLockEnabled({ dev: false, hostname: 'chronoflash.example' }), true)
     assert.equal(isSoftHost({ dev: false, hostname: 'chrono-flash.vercel.app' }), true)
-    assert.equal(dayLockEnabled({ dev: false, hostname: 'chrono-flash.vercel.app' }), false)
+    assert.equal(dayLockEnabled({ dev: false, hostname: 'chrono-flash.vercel.app' }), true)
     assert.equal(isSoftHost({ dev: false, hostname: 'localhost' }), true)
-    assert.equal(dayLockEnabled({ dev: false, hostname: 'localhost' }), false)
+    assert.equal(dayLockEnabled({ dev: false, hostname: 'localhost' }), true)
     assert.equal(isSoftHost({ dev: false, hostname: '127.0.0.1' }), true)
+    assert.equal(dayLockEnabled({ dev: false, hostname: '127.0.0.1' }), true)
     assert.equal(isSoftHost({ dev: true, hostname: 'chronoflash.example' }), true)
     assert.equal(
       dayLockEnabled({ dev: false, hostname: 'chronoflash.example', envFlag: true }),
-      false,
+      true,
     )
   })
 
-  it('boots Home with Start when day-lock is off even if today is recorded', () => {
-    assert.equal(canStart(record, TODAY, false), true)
-    const session = bootSession(batteryForDay(1), record, TODAY, false)
+  it('boots a finished Soft day on result and refuses a second start', () => {
+    assert.equal(canStart(record, TODAY, true), false)
+    const session = bootSession(batteryForDay(1), record, TODAY, true)
+    assert.equal(session.status, 'result')
+    const again = reduceSession(
+      { status: 'home', battery: batteryForDay(1), record },
+      { type: 'start', startedAt: 1, todayKey: TODAY, dayLock: true },
+    )
+    assert.equal(again.status, 'home')
+  })
+
+  it('allows a new official run when the day key changes', () => {
+    assert.equal(canStart(record, '2026-09-18', true), true)
+    const session = bootSession(batteryForDay(1), record, '2026-09-18', true)
     assert.equal(session.status, 'home')
-    const started = reduceSession(session, {
-      type: 'start',
-      startedAt: 1,
-      todayKey: TODAY,
-      dayLock: false,
-    })
-    assert.equal(started.status, 'playing')
   })
 })
