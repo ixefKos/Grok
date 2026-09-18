@@ -65,14 +65,21 @@ describe('day-1 pack coverage', () => {
     assert.ok(families.length >= MIN_FAMILIES)
     assert.deepEqual(
       new Set(families),
-      new Set(['pattern', 'verbal', 'spatial', 'logic', 'memory', 'attention']),
+      new Set(['verbal', 'logic', 'attention', 'pattern', 'memory', 'spatial']),
     )
-    assert.equal(families.join(' · '), 'pattern · verbal · spatial · logic · memory · attention')
+    assert.equal(families.join(' · '), 'verbal · logic · attention · pattern · memory · spatial')
   })
 
-  it('is not a math-only, snack, or single-family pack', () => {
+  it('is not a math-only, snack, literacy, or Fed/UN event pack', () => {
     const patternOnly = battery.items.every((item) => item.family === 'pattern')
     assert.equal(patternOnly, false)
+    const blob = JSON.stringify(DAY1_ITEMS)
+    assert.equal(blob.includes('Publish'), false)
+    assert.equal(blob.includes('Sponsored'), false)
+    assert.equal(blob.includes('leaked rumor'), false)
+    assert.equal(blob.includes('Wire Desk'), false)
+    assert.equal(blob.includes('YANOS'), false)
+    assert.equal(blob.includes('3.75%'), false)
     assert.ok(families.includes('verbal'))
     assert.ok(families.includes('spatial'))
     assert.ok(families.includes('logic'))
@@ -84,66 +91,67 @@ describe('day-1 pack coverage', () => {
     assert.ok(mix.split(' · ').length >= 6)
   })
 
-  it('implements the accepted news-literacy day-1 prompts and keys verbatim', () => {
-    assert.equal(DAY1_ITEMS[0]?.prompt, 'Which comes next? Tip → Report → Edit → ?')
-    assert.equal(DAY1_ITEMS[0]?.answer, 'Publish')
-    assert.deepEqual(
-      DAY1_ITEMS[0]?.choices.map((choice) => choice.label),
-      ['Retweet', 'Publish', 'Embargo', 'Archive'],
+  it('implements the accepted XTRENDS day-1 prompts and keys', () => {
+    assert.equal(DAY1_ITEMS[0]?.prompt, 'On US X trends, #DETvsBUF is which matchup?')
+    assert.equal(DAY1_ITEMS[0]?.answer, 'Lions at Bills')
+    assert.equal(
+      DAY1_ITEMS[0]?.choices.find((choice) => choice.id === DAY1_ITEMS[0].answer)?.label,
+      'Detroit Lions at Buffalo Bills',
     )
+
+    assert.equal(DAY1_ITEMS[1]?.prompt, 'Where is that #DETvsBUF game being played?')
+    assert.equal(DAY1_ITEMS[1]?.answer, 'Highmark')
+    assert.equal(
+      DAY1_ITEMS[1]?.choices.find((choice) => choice.id === DAY1_ITEMS[1].answer)?.label,
+      'Highmark Stadium (Orchard Park)',
+    )
+
+    assert.equal(DAY1_ITEMS[2]?.prompt, 'Josh Allen is quarterback for which team?')
+    assert.equal(DAY1_ITEMS[2]?.answer, 'Bills')
+
+    assert.equal(DAY1_ITEMS[3]?.family, 'attention')
+    assert.equal(DAY1_ITEMS[3]?.prompt, 'Which name is on US X trends for this Soft evening?')
+    assert.equal(DAY1_ITEMS[3]?.answer, 'Campbell')
+
+    assert.equal(DAY1_ITEMS[4]?.prompt, 'Which cluster is the Lions-side X-trends set?')
+    assert.equal(DAY1_ITEMS[4]?.answer, 'lions-cluster')
+    assert.equal(
+      DAY1_ITEMS[4]?.choices.find((choice) => choice.id === 'lions-cluster')?.label,
+      'Goff · Gibbs · #OnePride · Dan Campbell',
+    )
+
+    assert.equal(DAY1_ITEMS[5]?.prompt, 'Which set matches?')
+    assert.deepEqual(DAY1_ITEMS[5]?.flash, ['#DETvsBUF', 'Josh Allen', 'Goff', '#OnePride'])
+    assert.equal(DAY1_ITEMS[5]?.flashMs, MEMORY_FLASH_MS)
+    assert.equal(DAY1_ITEMS[5]?.answer, 'match')
 
     assert.equal(
-      DAY1_ITEMS[1]?.prompt,
-      'Odd one out: eyewitness video · official transcript · leaked rumor screenshot · on-the-record interview',
+      DAY1_ITEMS[6]?.prompt,
+      'Which club is on the worldwide X trends list this Soft evening?',
     )
-    assert.equal(DAY1_ITEMS[1]?.answer, 'leaked rumor screenshot')
+    assert.equal(DAY1_ITEMS[6]?.answer, 'Flamengo')
 
-    assert.equal(DAY1_ITEMS[2]?.prompt, 'Which byline card is the same card rotated 90° CW?')
-    assert.equal(DAY1_ITEMS[2]?.answer, 'rot-90')
-
-    assert.equal(
-      DAY1_ITEMS[3]?.prompt,
-      'All wire copy is edited before air. A segment aired live unedited. Was it wire copy?',
-    )
-    assert.equal(DAY1_ITEMS[3]?.answer, 'No')
-    assert.deepEqual(
-      DAY1_ITEMS[3]?.choices.map((choice) => choice.label),
-      ['Yes', 'No', 'Not enough info'],
-    )
-
-    assert.equal(DAY1_ITEMS[4]?.prompt, 'Which set matches?')
-    assert.equal(DAY1_ITEMS[4]?.answer, 'LIVE · UPDATE · ANALYSIS')
-    assert.deepEqual(DAY1_ITEMS[4]?.flash, ['LIVE', 'UPDATE', 'ANALYSIS'])
-    assert.equal(DAY1_ITEMS[4]?.flashMs, MEMORY_FLASH_MS)
-    assert.deepEqual(
-      DAY1_ITEMS[4]?.choices.map((choice) => choice.label),
-      [
-        'LIVE · UPDATE · ANALYSIS',
-        'LIVE · ANALYSIS · UPDATE',
-        'UPDATE · LIVE · ANALYSIS',
-        'LIVE · UPDATE · OPINION',
-      ],
-    )
-
-    assert.equal(DAY1_ITEMS[5]?.family, 'attention')
-    assert.equal(DAY1_ITEMS[5]?.prompt, 'Which label marks a paid placement?')
-    assert.equal(DAY1_ITEMS[5]?.answer, 'Sponsored')
-    assert.deepEqual(
-      DAY1_ITEMS[5]?.choices.map((choice) => choice.label),
-      ['Breaking', 'Exclusive', 'Sponsored', 'Updated'],
-    )
+    assert.equal(DAY1_ITEMS[7]?.prompt, 'Which trend card is the same card rotated 90° CW?')
+    assert.equal(DAY1_ITEMS[7]?.answer, 'rot-90')
   })
 
-  it('makes the spatial key the byline card rotated 90° CW', () => {
-    const spatial = DAY1_ITEMS[2]
+  it('never asks the DET–BUF final score', () => {
+    const blob = JSON.stringify(DAY1_ITEMS)
+    assert.equal(/\bfinal score\b/i.test(blob), false)
+    assert.equal(/\bwho won\b/i.test(blob), false)
+    assert.equal(/\b\d+\s*[-–]\s*\d+\b/.test(blob), false)
+  })
+
+  it('makes the spatial key the trend card rotated 90° CW', () => {
+    const spatial = DAY1_ITEMS[7]
     assert.ok(spatial?.promptByline)
     assert.equal(spatial.promptByline.rotate, 0)
+    assert.equal(spatial.promptByline.name, '#DETvsBUF')
     const correct = spatial.choices.find((choice) => choice.id === spatial.answer)
     assert.ok(correct?.byline)
     assert.equal(correct.byline.rotate, 90)
     assert.equal(correct.byline.name, spatial.promptByline.name)
     assert.equal(correct.byline.outlet, spatial.promptByline.outlet)
-    assert.equal(correct.byline.time, spatial.promptByline.time)
     const nearMisses = spatial.choices.filter((choice) => choice.id !== spatial.answer)
     assert.equal(nearMisses.length, 3)
     for (const option of nearMisses) {
@@ -171,7 +179,7 @@ describe('timer', () => {
     const playing = startRun()
     assert.equal(playing.status, 'playing')
     if (playing.status !== 'playing') return
-    const mid = reduceSession(playing, { type: 'answer', choice: 'Publish', elapsedMs: 4000 })
+    const mid = reduceSession(playing, { type: 'answer', choice: 'Lions at Bills', elapsedMs: 4000 })
     assert.equal(mid.status, 'playing')
     if (mid.status !== 'playing') return
     assert.equal(mid.startedAt, playing.startedAt)
@@ -184,43 +192,58 @@ describe('scoring', () => {
     const battery = batteryForDay(1)
     assert.equal(
       scoreAnswers(battery, [
-        'Publish',
-        'leaked rumor screenshot',
+        'Lions at Bills',
+        'Highmark',
+        'Bills',
+        'Campbell',
+        'lions-cluster',
+        'match',
+        'Flamengo',
         'rot-90',
-        'No',
-        'LIVE · UPDATE · ANALYSIS',
-        'Sponsored',
       ]),
-      6,
+      8,
     )
     assert.equal(
       scoreAnswers(battery, [
-        'Retweet',
-        'eyewitness video',
+        'Bills at Lions',
+        'Ford Field',
+        'Lions',
+        'Belichick',
+        'bills-cluster',
+        'swap-qbs',
+        'Real Madrid',
         'rot-0',
-        'Yes',
-        'LIVE · UPDATE · OPINION',
-        'Breaking',
       ]),
       0,
     )
     assert.equal(
       scoreAnswers(battery, [
-        'Publish',
-        'eyewitness video',
-        'rot-90',
-        'Yes',
-        'LIVE · UPDATE · ANALYSIS',
-        'Breaking',
+        'Lions at Bills',
+        'Ford Field',
+        'Bills',
+        'Belichick',
+        'lions-cluster',
+        'swap-qbs',
+        'Flamengo',
+        'rot-0',
       ]),
-      3,
+      4,
     )
   })
 
   it('finishes a mixed run as Score A/B with the live elapsed', () => {
     const result = answerAll(
       startRun(),
-      ['Publish', 'eyewitness video', 'rot-90', 'Yes', 'LIVE · UPDATE · ANALYSIS', 'Breaking'],
+      [
+        'Lions at Bills',
+        'Ford Field',
+        'Bills',
+        'Belichick',
+        'lions-cluster',
+        'swap-qbs',
+        'Flamengo',
+        'rot-0',
+      ],
       125_000,
     )
     assert.equal(result.status, 'result')
@@ -228,15 +251,15 @@ describe('scoring', () => {
     assert.deepEqual(result.outcome, {
       kind: 'solved',
       elapsedMs: 125_000,
-      correct: 3,
-      total: 6,
+      correct: 4,
+      total: 8,
     })
     const paste = formatShare({
       dayIndex: 1,
       outcome: result.outcome,
       url: SHARE_URL,
     })
-    assert.equal(paste, `Chrono Flash #1\nScore 3/6 · 0:02:05\n${SHARE_URL}`)
+    assert.equal(paste, `Chrono Flash #1\nScore 4/8 · 0:02:05\n${SHARE_URL}`)
   })
 })
 
@@ -244,7 +267,7 @@ describe('soft retry off', () => {
   const record = {
     dayKey: TODAY,
     dayIndex: 1 as const,
-    outcome: { kind: 'solved' as const, elapsedMs: 12_000, correct: 4, total: 6 },
+    outcome: { kind: 'solved' as const, elapsedMs: 12_000, correct: 4, total: 8 },
   }
 
   it('blocks a second start on the same day key', () => {
@@ -263,12 +286,14 @@ describe('soft retry off', () => {
 
   it('ignores start after a result', () => {
     const result = answerAll(startRun(), [
-      'Publish',
-      'leaked rumor screenshot',
+      'Lions at Bills',
+      'Highmark',
+      'Bills',
+      'Campbell',
+      'lions-cluster',
+      'match',
+      'Flamengo',
       'rot-90',
-      'No',
-      'LIVE · UPDATE · ANALYSIS',
-      'Sponsored',
     ])
     const again = reduceSession(result, { type: 'start', startedAt: 99, todayKey: TODAY })
     assert.equal(again.status, 'result')
@@ -287,34 +312,34 @@ describe('share unit', () => {
   it('pastes Score A/B, time, and url on a solve', () => {
     const paste = formatShare({
       dayIndex: 3,
-      outcome: { kind: 'solved', elapsedMs: 125_000, correct: 5, total: 6 },
+      outcome: { kind: 'solved', elapsedMs: 125_000, correct: 5, total: 8 },
       url: SHARE_URL,
     })
-    assert.equal(paste, `Chrono Flash #3\nScore 5/6 · 0:02:05\n${SHARE_URL}`)
-    assert.equal(isCanonicalShare(paste, 3, SHARE_URL, 6), true)
+    assert.equal(paste, `Chrono Flash #3\nScore 5/8 · 0:02:05\n${SHARE_URL}`)
+    assert.equal(isCanonicalShare(paste, 3, SHARE_URL, 8), true)
   })
 
   it('records DNF as Score —/B · DNF without a fake fast time', () => {
     const playing = startRun(batteryForDay(2))
-    const afterTwo = answerAll(playing, ['Publish', 'leaked rumor screenshot'], 8000)
+    const afterTwo = answerAll(playing, ['Lions at Bills', 'Highmark'], 8000)
     const result = reduceSession(afterTwo, { type: 'dnf' })
     assert.equal(result.status, 'result')
     if (result.status !== 'result') return
-    assert.deepEqual(result.outcome, { kind: 'dnf', total: 6 })
+    assert.deepEqual(result.outcome, { kind: 'dnf', total: 8 })
     const paste = formatShare({
       dayIndex: 2,
       outcome: result.outcome,
       url: SHARE_URL,
     })
-    assert.equal(paste, `Chrono Flash #2\nScore —/6 · DNF\n${SHARE_URL}`)
+    assert.equal(paste, `Chrono Flash #2\nScore —/8 · DNF\n${SHARE_URL}`)
     assert.equal(paste.includes('0:00:00'), false)
-    assert.equal(isCanonicalShare(paste, 2, SHARE_URL, 6), true)
+    assert.equal(isCanonicalShare(paste, 2, SHARE_URL, 8), true)
   })
 
   it('keeps the share card spoiler-safe and builds an X intent URL', () => {
-    const outcome = { kind: 'solved' as const, elapsedMs: 4000, correct: 6, total: 6 }
+    const outcome = { kind: 'solved' as const, elapsedMs: 4000, correct: 8, total: 8 }
     const paste = formatShare({ dayIndex: 1, outcome, url: SHARE_URL })
-    assert.equal(isCanonicalShare(paste, 1, SHARE_URL, 6), true)
+    assert.equal(isCanonicalShare(paste, 1, SHARE_URL, 8), true)
     assert.equal(paste.split('\n').length, 3)
     for (const item of DAY1_ITEMS) {
       assert.equal(paste.includes(item.prompt), false)
@@ -366,42 +391,38 @@ describe('storage boundary', () => {
   })
 })
 
-describe('day-lock on Soft and LIVE', () => {
+describe('soft host unlock', () => {
   const record = {
     dayKey: TODAY,
     dayIndex: 1 as const,
-    outcome: { kind: 'dnf' as const, total: 6 },
+    outcome: { kind: 'dnf' as const, total: 8 },
   }
 
-  it('locks Soft hosts, localhost, DEV, and a custom LIVE domain', () => {
+  it('unlocks Soft hosts and keeps a custom LIVE domain locked', () => {
     assert.equal(isSoftHost({ dev: false, hostname: 'chronoflash.example' }), false)
+    assert.equal(dayLockEnabled({ dev: false, hostname: 'chronoflash.example' }), true)
     assert.equal(isSoftHost({ dev: false, hostname: 'chrono-flash.vercel.app' }), true)
+    assert.equal(dayLockEnabled({ dev: false, hostname: 'chrono-flash.vercel.app' }), false)
     assert.equal(isSoftHost({ dev: false, hostname: 'localhost' }), true)
+    assert.equal(dayLockEnabled({ dev: false, hostname: 'localhost' }), false)
     assert.equal(isSoftHost({ dev: false, hostname: '127.0.0.1' }), true)
     assert.equal(isSoftHost({ dev: true, hostname: 'chronoflash.example' }), true)
-    assert.equal(dayLockEnabled({ dev: false, hostname: 'chronoflash.example' }), true)
-    assert.equal(dayLockEnabled({ dev: false, hostname: 'chrono-flash.vercel.app' }), true)
-    assert.equal(dayLockEnabled({ dev: false, hostname: 'localhost' }), true)
-    assert.equal(dayLockEnabled({ dev: true, hostname: 'chronoflash.example' }), true)
     assert.equal(
       dayLockEnabled({ dev: false, hostname: 'chronoflash.example', envFlag: true }),
-      true,
+      false,
     )
   })
 
-  it('boots Result after a finished day so Start is gone on reload', () => {
-    assert.equal(canStart(record, TODAY), false)
-    const session = bootSession(batteryForDay(1), record, TODAY)
-    assert.equal(session.status, 'result')
-    if (session.status === 'result') {
-      assert.deepEqual(session.outcome, record.outcome)
-      assert.equal(session.outcome.kind, 'dnf')
-    }
+  it('boots Home with Start when day-lock is off even if today is recorded', () => {
+    assert.equal(canStart(record, TODAY, false), true)
+    const session = bootSession(batteryForDay(1), record, TODAY, false)
+    assert.equal(session.status, 'home')
     const started = reduceSession(session, {
       type: 'start',
       startedAt: 1,
       todayKey: TODAY,
+      dayLock: false,
     })
-    assert.equal(started.status, 'result')
+    assert.equal(started.status, 'playing')
   })
 })

@@ -332,7 +332,7 @@ export default function App() {
       {session.status === 'home' ? (
         <section className="card">
           <p className="lede">
-            Six mixed-skill items. One official timed run today. No practice retry.
+            X-trends Soft evening. Mixed-skill items. No final score asked.
           </p>
           <p className="mix">{skillFamilies(today.battery).join(' · ')}</p>
           <button type="button" className="primary" onClick={start}>

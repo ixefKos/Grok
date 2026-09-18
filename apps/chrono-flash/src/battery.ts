@@ -39,98 +39,130 @@ export function sameCells(left: readonly Cell[], right: readonly Cell[]): boolea
   return key(left) === key(right)
 }
 
-const BYLINE: Omit<BylineCard, 'rotate'> = {
-  name: 'R. Chen',
-  outlet: 'Wire Desk',
-  time: '06:12',
+/** Trend-card chrome for the spatial rotate item. Not a literacy byline. */
+const TREND: Omit<BylineCard, 'rotate'> = {
+  name: '#DETvsBUF',
+  outlet: 'US X trends',
+  time: 'Soft p.m.',
 }
 
-function byline(rotate: BylineCard['rotate']): BylineCard {
-  return { ...BYLINE, rotate }
+function trendCard(rotate: BylineCard['rotate']): BylineCard {
+  return { ...TREND, rotate }
 }
 
+/**
+ * Soft day-1 from Wren XTRENDS table (cite-or-unknown).
+ * Factory path `/workspace/ixef-games/research/work-order-2026-09-17/CHRONO_FLASH_QUESTION_BANK_XTRENDS.md`
+ * was not in this checkout. Literacy Soft and NEWS_BANK Fed/UN/YANOS pack are not this cut.
+ * Never asks the DET–BUF final score (unknown).
+ */
 export const DAY1_ITEMS: readonly BatteryItem[] = [
   {
-    id: 'q1-pattern-desk-flow',
-    family: 'pattern',
-    kind: 'choice',
-    prompt: 'Which comes next? Tip → Report → Edit → ?',
-    choices: [
-      { id: 'Retweet', label: 'Retweet' },
-      { id: 'Publish', label: 'Publish' },
-      { id: 'Embargo', label: 'Embargo' },
-      { id: 'Archive', label: 'Archive' },
-    ],
-    answer: 'Publish',
-  },
-  {
-    id: 'q2-verbal-odd-source',
+    id: 'q1-verbal-detvsbuf-matchup',
     family: 'verbal',
     kind: 'choice',
-    prompt:
-      'Odd one out: eyewitness video · official transcript · leaked rumor screenshot · on-the-record interview',
+    prompt: 'On US X trends, #DETvsBUF is which matchup?',
     choices: [
-      { id: 'eyewitness video', label: 'eyewitness video' },
-      { id: 'official transcript', label: 'official transcript' },
-      { id: 'leaked rumor screenshot', label: 'leaked rumor screenshot' },
-      { id: 'on-the-record interview', label: 'on-the-record interview' },
+      { id: 'Bills at Lions', label: 'Buffalo Bills at Detroit Lions' },
+      { id: 'Lions at Bills', label: 'Detroit Lions at Buffalo Bills' },
+      { id: 'Lions at Chiefs', label: 'Detroit Lions at Kansas City Chiefs' },
+      { id: 'Cowboys at Bills', label: 'Dallas Cowboys at Buffalo Bills' },
     ],
-    answer: 'leaked rumor screenshot',
+    answer: 'Lions at Bills',
   },
   {
-    id: 'q3-spatial-byline-rotate',
-    family: 'spatial',
-    kind: 'spatial',
-    prompt: 'Which byline card is the same card rotated 90° CW?',
-    promptByline: byline(0),
+    id: 'q2-verbal-highmark-venue',
+    family: 'verbal',
+    kind: 'choice',
+    prompt: 'Where is that #DETvsBUF game being played?',
     choices: [
-      { id: 'rot-270', label: 'A', byline: byline(270) },
-      { id: 'rot-90', label: 'B', byline: byline(90) },
-      { id: 'rot-180', label: 'C', byline: byline(180) },
-      { id: 'rot-0', label: 'D', byline: byline(0) },
+      { id: 'Ford Field', label: 'Ford Field (Detroit)' },
+      { id: 'Arrowhead', label: 'Arrowhead Stadium (Kansas City)' },
+      { id: 'Highmark', label: 'Highmark Stadium (Orchard Park)' },
+      { id: 'MetLife', label: 'MetLife Stadium (East Rutherford)' },
     ],
-    answer: 'rot-90',
+    answer: 'Highmark',
   },
   {
-    id: 'q4-logic-wire-copy',
+    id: 'q3-logic-josh-allen',
     family: 'logic',
     kind: 'choice',
-    prompt:
-      'All wire copy is edited before air. A segment aired live unedited. Was it wire copy?',
+    prompt: 'Josh Allen is quarterback for which team?',
     choices: [
-      { id: 'Yes', label: 'Yes' },
-      { id: 'No', label: 'No' },
-      { id: 'Not enough info', label: 'Not enough info' },
+      { id: 'Lions', label: 'Detroit Lions' },
+      { id: 'Bills', label: 'Buffalo Bills' },
+      { id: 'Chiefs', label: 'Kansas City Chiefs' },
+      { id: 'Ravens', label: 'Baltimore Ravens' },
     ],
-    answer: 'No',
+    answer: 'Bills',
   },
   {
-    id: 'q5-memory-desk-labels',
+    id: 'q4-attention-dan-campbell',
+    family: 'attention',
+    kind: 'choice',
+    prompt: 'Which name is on US X trends for this Soft evening?',
+    choices: [
+      { id: 'Belichick', label: 'Bill Belichick' },
+      { id: 'Campbell', label: 'Dan Campbell' },
+      { id: 'Brady', label: 'Tom Brady' },
+      { id: 'McVay', label: 'Sean McVay' },
+    ],
+    answer: 'Campbell',
+  },
+  {
+    id: 'q5-pattern-lions-cluster',
+    family: 'pattern',
+    kind: 'choice',
+    prompt: 'Which cluster is the Lions-side X-trends set?',
+    choices: [
+      { id: 'bills-cluster', label: 'Allen · Cook · #BillsMafia · McDermott' },
+      { id: 'mixed-cluster', label: 'Goff · Allen · #DETvsBUF · Highmark' },
+      { id: 'lions-cluster', label: 'Goff · Gibbs · #OnePride · Dan Campbell' },
+      { id: 'nfl-cluster', label: 'Mahomes · Kelce · #ChiefsKingdom · Reid' },
+    ],
+    answer: 'lions-cluster',
+  },
+  {
+    id: 'q6-memory-xtends-flash',
     family: 'memory',
     kind: 'memory',
     prompt: 'Which set matches?',
-    flash: ['LIVE', 'UPDATE', 'ANALYSIS'],
+    flash: ['#DETvsBUF', 'Josh Allen', 'Goff', '#OnePride'],
     flashMs: MEMORY_FLASH_MS,
     choices: [
-      { id: 'LIVE · UPDATE · ANALYSIS', label: 'LIVE · UPDATE · ANALYSIS' },
-      { id: 'LIVE · ANALYSIS · UPDATE', label: 'LIVE · ANALYSIS · UPDATE' },
-      { id: 'UPDATE · LIVE · ANALYSIS', label: 'UPDATE · LIVE · ANALYSIS' },
-      { id: 'LIVE · UPDATE · OPINION', label: 'LIVE · UPDATE · OPINION' },
+      { id: 'match', label: '#DETvsBUF · Josh Allen · Goff · #OnePride' },
+      { id: 'swap-qbs', label: '#DETvsBUF · Goff · Josh Allen · #OnePride' },
+      { id: 'bills-swap', label: '#DETvsBUF · Josh Allen · Cook · #BillsMafia' },
+      { id: 'pride-swap', label: '#OnePride · Josh Allen · Goff · #DETvsBUF' },
     ],
-    answer: 'LIVE · UPDATE · ANALYSIS',
+    answer: 'match',
   },
   {
-    id: 'q6-attention-sponsored',
-    family: 'attention',
+    id: 'q7-verbal-flamengo-ww',
+    family: 'verbal',
     kind: 'choice',
-    prompt: 'Which label marks a paid placement?',
+    prompt: 'Which club is on the worldwide X trends list this Soft evening?',
     choices: [
-      { id: 'Breaking', label: 'Breaking' },
-      { id: 'Exclusive', label: 'Exclusive' },
-      { id: 'Sponsored', label: 'Sponsored' },
-      { id: 'Updated', label: 'Updated' },
+      { id: 'Real Madrid', label: 'Real Madrid' },
+      { id: 'Flamengo', label: 'Flamengo' },
+      { id: 'Manchester City', label: 'Manchester City' },
+      { id: 'Boca Juniors', label: 'Boca Juniors' },
     ],
-    answer: 'Sponsored',
+    answer: 'Flamengo',
+  },
+  {
+    id: 'q8-spatial-trend-rotate',
+    family: 'spatial',
+    kind: 'spatial',
+    prompt: 'Which trend card is the same card rotated 90° CW?',
+    promptByline: trendCard(0),
+    choices: [
+      { id: 'rot-270', label: 'A', byline: trendCard(270) },
+      { id: 'rot-90', label: 'B', byline: trendCard(90) },
+      { id: 'rot-180', label: 'C', byline: trendCard(180) },
+      { id: 'rot-0', label: 'D', byline: trendCard(0) },
+    ],
+    answer: 'rot-90',
   },
 ]
 
