@@ -5,6 +5,7 @@ import {
   buildPostTimeUrl,
   dayIndexFor,
   dayLockEnabled,
+  isSoftHost,
   elapsedMs,
   formatElapsed,
   formatShare,
@@ -24,12 +25,20 @@ function shareUrl(): string {
   return window.location.origin + window.location.pathname
 }
 
-function hostDayLock(): boolean {
-  return dayLockEnabled({
+function hostGate() {
+  return {
     dev: import.meta.env.DEV,
     hostname: window.location.hostname,
     envFlag: import.meta.env.VITE_SOFT_UNLOCK === '1',
-  })
+  }
+}
+
+function hostDayLock(): boolean {
+  return dayLockEnabled(hostGate())
+}
+
+function hostSoftLabel(): boolean {
+  return isSoftHost(hostGate())
 }
 
 function todayParts(now = new Date()) {
@@ -200,6 +209,7 @@ function ItemPrompt({ item, memoryReady }: { item: BatteryItem; memoryReady: boo
 export default function App() {
   const today = useMemo(() => todayParts(), [])
   const dayLock = hostDayLock()
+  const softLabel = hostSoftLabel()
   const [session, setSession] = useState<Session>(() =>
     bootSession(today.battery, loadRecord(window.localStorage), today.dayKey, dayLock),
   )
@@ -311,23 +321,20 @@ export default function App() {
   return (
     <main className="shell">
       <header className="brand">
-        <p className="kicker">{dayLock ? 'Daily IQ battery' : SOFT_KICKER}</p>
-        <h1>{dayLock ? 'Chrono Flash' : SOFT_TITLE}</h1>
+        <p className="kicker">{softLabel ? SOFT_KICKER : 'Daily IQ battery'}</p>
+        <h1>{softLabel ? SOFT_TITLE : 'Chrono Flash'}</h1>
         <p className="day">
           #{today.dayIndex}
-          {dayLock ? null : ` · ${SOFT_TIP}`}
+          {softLabel ? ` · ${SOFT_TIP}` : null}
         </p>
       </header>
 
       {session.status === 'home' ? (
         <section className="card">
           <p className="lede">
-            {dayLock
-              ? 'Six mixed-skill items. One official timed run today. No practice retry.'
-              : 'Six mixed-skill items. Soft replay on.'}
+            Six mixed-skill items. One official timed run today. No practice retry.
           </p>
           <p className="mix">{skillFamilies(today.battery).join(' · ')}</p>
-          {dayLock ? null : <p className="note">Soft · unlocked</p>}
           <button type="button" className="primary" onClick={start}>
             Start
           </button>
@@ -395,9 +402,7 @@ export default function App() {
           {fallbackCopied ? (
             <p className="note">Intent blocked. Score card copied as a fallback.</p>
           ) : (
-            <p className="note">
-              {dayLock ? 'Come back tomorrow for the next battery.' : 'Soft · unlocked. Reload to run again.'}
-            </p>
+            <p className="note">Come back tomorrow for the next battery.</p>
           )}
         </section>
       ) : null}

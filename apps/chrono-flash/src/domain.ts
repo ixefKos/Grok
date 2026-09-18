@@ -110,15 +110,16 @@ export function canStart(
   return record === null || record.dayKey !== todayKey
 }
 
-/** Soft preview only (*.vercel.app / localhost / DEV / VITE_SOFT_UNLOCK=1). LIVE custom domain must stay locked — do not merge LIVE with day-lock OFF. */
+/** Branding only (News Soft home label). Does not unlock a second run. */
 export function isSoftHost(input: HostGate): boolean {
   if (input.dev || input.envFlag) return true
   const host = input.hostname.toLowerCase()
   return host.endsWith('.vercel.app') || host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
 }
 
-export function dayLockEnabled(input: HostGate): boolean {
-  return !isSoftHost(input)
+/** One official run per local day on every host Soft ships, including Soft alias and localhost. Soft unlock is restored OFF. */
+export function dayLockEnabled(_input?: HostGate): boolean {
+  return true
 }
 
 export function bootSession(

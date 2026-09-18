@@ -1,11 +1,16 @@
-# Soft unlock · pre-LIVE lock
+# Soft unlock · restored OFF (pre-LIVE)
 
-Soft (`*.vercel.app`, `localhost`, `127.0.0.1`, `import.meta.env.DEV`, or `VITE_SOFT_UNLOCK=1`) has **day-lock OFF**. `bootSession` returns Home with Start. Reload after a run does not stick the score card.
+Soft unlock (`dayLockEnabled() === false` on `*.vercel.app` / localhost / DEV / `VITE_SOFT_UNLOCK=1`) was a **temporary Soft-test** exception so Wren could replay. **Restored:** one official run per local day · soft retry OFF on every host Soft ships, including the Soft alias and localhost.
 
-`dayLockEnabled()` defaults **ON** for any other host (a future public LIVE domain).
+`dayLockEnabled()` is **true** everywhere. `bootSession` with today's record returns Result. Reload sticks the score / DNF card. Start is gone.
 
-## Before ANY LIVE ask / LIVE domain
+`isSoftHost()` is **branding only** (News Soft home label + tip SHA). It does not unlock a second run.
 
-1. Re-enable one-run/day · soft retry OFF (`dayLockEnabled() === true` on LIVE).
-2. Verify: play → result → reload stays on score · Start gone · DNF ≠ `0:00:00` · **Post time** still works.
-3. Do not merge LIVE with day-lock OFF.
+## Pre-LIVE check
+
+1. Play → result → reload stays on score · Start gone.
+2. DNF ≠ `0:00:00`.
+3. **Post time** still opens the intent (Score A/B · time · URL).
+4. Home still **Chrono Flash · News Soft** before the official run.
+
+HOLD LIVE · do not merge until product GO.
