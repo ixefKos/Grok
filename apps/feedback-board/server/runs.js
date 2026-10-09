@@ -38,6 +38,7 @@ import {
   symlinkPathsFromRaw,
   symlinkPathsOnDisk,
 } from "./guard.js";
+import { scanPublishChanges } from "./credential-scan.js";
 import { agentTreeUsers, killMarkedProcesses } from "./tree-idle.js";
 import {
   applyTreeChanges,
@@ -419,6 +420,7 @@ async function prepareAndSpawn(cardId) {
     spawnTime,
     marker,
     sandboxRoot: sandbox.root,
+    authBytes: sandbox.authBytes,
   });
 
   const prompt = buildAgentPrompt(card);
@@ -779,6 +781,8 @@ export async function publishAgentTree({
       );
       return { ok: true, noChanges: true, sha: baseSha };
     }
+    const secrets = scanPublishChanges(planned.changes, baseline && baseline.authBytes);
+    if (!secrets.ok) return refuse(secrets.reason, secrets.blocked);
 
     freshPath = freshWorktreePath(workCopy, cardId);
     if (pathContainsLumen(freshPath)) return refuse("Work copy path contains Lumen.");

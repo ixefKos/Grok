@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import { agentSpawnPlan, copyGrokAuth, prepareAgentSandbox, scrubAgentEnv } from "../server/agent-launch.js";
 import { mutateState, readState } from "../server/store.js";
 import { applyTreeChanges, inspectAgentTree, removeAgentTree, snapshotAgentTree } from "../server/tree-gate.js";
-import { LSOF_BIN, RUN_MARKER_ENV, interpretLsofOutput, killMarkedProcesses, lsofUsers, pidsCarryingMarker } from "../server/tree-idle.js";
+import { AGENT_BUSY, LSOF_BIN, RUN_MARKER_ENV, interpretLsofOutput, killMarkedProcesses, lsofUsers, pidsCarryingMarker } from "../server/tree-idle.js";
 import { publishAgentTree } from "../server/runs.js";
 
 const SECRET = "FB-RACE-CANARY-9f3c1a7b";
@@ -414,6 +414,90 @@ while True:
     assert.equal(LSOF_BIN, "/usr/sbin/lsof");
   });
 
+  it("re-reads the marker and does not kill a reused pid", () => {
+    const marker = "feedbac0";
+    const killed = [];
+    const events = [];
+    const result = killMarkedProcesses(marker, "darwin", {
+      execFileSync: (_bin, args) => {
+        events.push(args[0] === "-p" ? "reread" : "scan");
+        if (args[0] === "-p") return "  4242 launchd\n";
+        return `  4242 sleep ${RUN_MARKER_ENV}=${marker}\n`;
+      },
+      kill: (pid) => killed.push(pid),
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.killed, []);
+    assert.deepEqual(killed, []);
+    assert.deepEqual(events, ["scan", "reread"]);
+  });
+
+  it("kills a pid only after a re-read still shows the marker", () => {
+    const marker = "feedbac1";
+    const killed = [];
+    const events = [];
+    const result = killMarkedProcesses(marker, "darwin", {
+      execFileSync: (_bin, args) => {
+        events.push(args[0] === "-p" ? `reread:${args[1]}` : "scan");
+        if (args[0] === "-p") {
+          if (args[1] === "5150") return `  5150 python ${RUN_MARKER_ENV}=${marker}\n`;
+          return "  6161 launchd\n";
+        }
+        return `  5150 python ${RUN_MARKER_ENV}=${marker}\n  6161 python ${RUN_MARKER_ENV}=${marker}\n`;
+      },
+      kill: (pid, signal) => {
+        events.push(`kill:${pid}:${signal}`);
+        killed.push(pid);
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(killed, [5150]);
+    assert.deepEqual(events, ["scan", "reread:5150", "kill:5150:SIGKILL", "reread:6161"]);
+  });
+
+  it("does not kill when the marker re-read fails", () => {
+    const marker = "feedbac2";
+    const killed = [];
+    const result = killMarkedProcesses(marker, "darwin", {
+      execFileSync: (_bin, args) => {
+        if (args[0] === "-p") throw Object.assign(new Error("ps failed"), { status: 2 });
+        return `  7171 python ${RUN_MARKER_ENV}=${marker}\n`;
+      },
+      kill: (pid) => killed.push(pid),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, AGENT_BUSY);
+    assert.deepEqual(killed, []);
+  });
+
+  it("treats a failed marker scan as busy and does not kill", () => {
+    const killed = [];
+    const result = killMarkedProcesses("feedbac4", "darwin", {
+      execFileSync: () => {
+        throw Object.assign(new Error("ps failed"), { status: 1 });
+      },
+      kill: (pid) => killed.push(pid),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, AGENT_BUSY);
+    assert.deepEqual(killed, []);
+  });
+
+  it("skips a pid that is already gone at the marker re-read", () => {
+    const marker = "feedbac3";
+    const killed = [];
+    const result = killMarkedProcesses(marker, "darwin", {
+      execFileSync: (_bin, args) => {
+        if (args[0] === "-p") throw Object.assign(new Error("no such process"), { status: 1 });
+        return `  8181 python ${RUN_MARKER_ENV}=${marker}\n`;
+      },
+      kill: (pid) => killed.push(pid),
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.killed, []);
+    assert.deepEqual(killed, []);
+  });
+
   it("finds processes by the run marker and kills them on darwin", { skip: process.platform !== "darwin" }, async () => {
     const marker = `m${process.pid.toString(16)}`;
     const listing = `    1 launchd\n   77 ${RUN_MARKER_ENV}=other\n  ${process.pid} ${RUN_MARKER_ENV}=${marker}\n  4242 python ${RUN_MARKER_ENV}=${marker}\n`;
@@ -474,6 +558,7 @@ while True:
       const sandbox = prepareAgentSandbox(real);
       const copied = path.join(sandbox.grokHome, "auth.json");
       assert.equal(sandbox.authCopied, true);
+      assert.equal(sandbox.authBytes.toString("utf8"), "token-value\n");
       assert.equal(fs.readFileSync(copied, "utf8"), "token-value\n");
       assert.equal(fs.statSync(copied).mode & 0o777, 0o444);
       assert.equal(fs.existsSync(path.join(sandbox.grokHome, "mcp_credentials.json")), false);

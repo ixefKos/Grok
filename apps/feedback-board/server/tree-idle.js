@@ -125,23 +125,36 @@ export function pidsCarryingMarker(text, marker, selfPid = process.pid) {
   return pids;
 }
 
-export function killMarkedProcesses(marker, platform = process.platform) {
+const PS_FORMAT = ["-axEww", "-o", "pid=", "-o", "command="];
+
+function psOptions() {
+  return { encoding: "utf8", timeout: 15000, maxBuffer: LSOF_MAX_BUFFER };
+}
+
+function psText(execImpl, args, missingOk = false) {
+  try {
+    const stdout = execImpl("/bin/ps", args, psOptions());
+    return { ok: true, stdout: typeof stdout === "string" ? stdout : String(stdout ?? "") };
+  } catch (error) {
+    if (missingOk && error && error.status === 1) return { ok: true, stdout: "" };
+    return { ok: false, stdout: "" };
+  }
+}
+
+export function killMarkedProcesses(marker, platform = process.platform, options = {}) {
+  const execImpl = options.execFileSync || execFileSync;
+  const killImpl = options.kill || ((pid, signal) => process.kill(pid, signal));
   if (platform !== "darwin") return { ok: true, killed: [] };
   if (!marker) return { ok: false, reason: AGENT_BUSY, killed: [] };
-  let stdout = "";
-  try {
-    stdout = execFileSync("/bin/ps", ["-axEww", "-o", "pid=", "-o", "command="], {
-      encoding: "utf8",
-      timeout: 15000,
-      maxBuffer: LSOF_MAX_BUFFER,
-    });
-  } catch {
-    return { ok: false, reason: AGENT_BUSY, killed: [] };
-  }
+  const listing = psText(execImpl, PS_FORMAT);
+  if (!listing.ok) return { ok: false, reason: AGENT_BUSY, killed: [] };
   const killed = [];
-  for (const pid of pidsCarryingMarker(stdout, marker)) {
+  for (const pid of pidsCarryingMarker(listing.stdout, marker)) {
+    const again = psText(execImpl, ["-p", String(pid), ...PS_FORMAT], true);
+    if (!again.ok) return { ok: false, reason: AGENT_BUSY, killed };
+    if (!pidsCarryingMarker(again.stdout, marker).includes(pid)) continue;
     try {
-      process.kill(pid, "SIGKILL");
+      killImpl(pid, "SIGKILL");
       killed.push(pid);
     } catch (error) {
       if (!error || error.code !== "ESRCH") return { ok: false, reason: AGENT_BUSY, killed };

@@ -52,53 +52,63 @@ export function buildGrokArgs(prompt, worktreePath) {
   return args;
 }
 
-export function copyGrokAuth(source, dest) {
+const AUTH_CAP = 2 * 1024 * 1024;
+
+function readNoFollow(source, maxBytes) {
   let info;
   try {
     info = fs.lstatSync(source);
   } catch {
-    return false;
+    return null;
   }
-  if (!info.isFile() || info.isSymbolicLink()) return false;
+  if (!info.isFile() || info.isSymbolicLink()) return null;
   const input = fs.openSync(source, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
-    const output = fs.openSync(
-      dest,
-      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
-      0o444,
-    );
-    try {
-      const buffer = Buffer.alloc(64 * 1024);
-      let position = 0;
-      while (position <= 2 * 1024 * 1024) {
-        const read = fs.readSync(input, buffer, 0, buffer.length, position);
-        if (read <= 0) break;
-        fs.writeSync(output, buffer, 0, read);
-        position += read;
-      }
-      if (position > 2 * 1024 * 1024) {
-        fs.closeSync(output);
-        fs.unlinkSync(dest);
-        return false;
-      }
-    } catch (error) {
-      try {
-        fs.closeSync(output);
-      } catch {
-        // The destination fd is already closed.
-      }
-      try {
-        fs.unlinkSync(dest);
-      } catch {
-        // The partial copy is already gone.
-      }
-      throw error;
+    const chunks = [];
+    const buffer = Buffer.alloc(64 * 1024);
+    let position = 0;
+    while (position <= maxBytes) {
+      const read = fs.readSync(input, buffer, 0, buffer.length, position);
+      if (read <= 0) break;
+      chunks.push(Buffer.from(buffer.subarray(0, read)));
+      position += read;
+      if (position > maxBytes) return null;
     }
-    fs.closeSync(output);
+    return Buffer.concat(chunks, position);
   } finally {
     fs.closeSync(input);
   }
+}
+
+function writeNoFollow(dest, bytes) {
+  const output = fs.openSync(
+    dest,
+    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
+    0o444,
+  );
+  try {
+    fs.writeSync(output, bytes);
+  } catch (error) {
+    try {
+      fs.closeSync(output);
+    } catch {
+      // The destination fd is already closed.
+    }
+    try {
+      fs.unlinkSync(dest);
+    } catch {
+      // The partial copy is already gone.
+    }
+    throw error;
+  }
+  fs.closeSync(output);
   fs.chmodSync(dest, 0o444);
+}
+
+export function copyGrokAuth(source, dest) {
+  const bytes = readNoFollow(source, AUTH_CAP);
+  if (!bytes) return false;
+  writeNoFollow(dest, bytes);
   return true;
 }
 
@@ -109,8 +119,9 @@ export function prepareAgentSandbox(realHome = os.homedir()) {
   const grokHome = path.join(home, ".grok");
   fs.mkdirSync(tmp, { recursive: true, mode: 0o700 });
   fs.mkdirSync(grokHome, { recursive: true, mode: 0o755 });
-  const authCopied = copyGrokAuth(path.join(realHome, ".grok", "auth.json"), path.join(grokHome, "auth.json"));
-  return { root, home, tmp, grokHome, authCopied };
+  const authBytes = readNoFollow(path.join(realHome, ".grok", "auth.json"), AUTH_CAP);
+  if (authBytes) writeNoFollow(path.join(grokHome, "auth.json"), authBytes);
+  return { root, home, tmp, grokHome, authCopied: Boolean(authBytes), authBytes: authBytes || null };
 }
 
 export function scrubAgentEnv(source = process.env, options = {}) {
