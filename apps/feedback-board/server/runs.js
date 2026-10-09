@@ -782,7 +782,28 @@ export async function publishAgentTree({
       return { ok: true, noChanges: true, sha: baseSha };
     }
     const secrets = scanPublishChanges(planned.changes, baseline && baseline.authBytes);
-    if (!secrets.ok) return refuse(secrets.reason, secrets.blocked);
+    if (!secrets.ok) {
+      rejection = secrets.reason;
+      appendLog(cardId, `${secrets.reason}\n`, stateRoot);
+      await markCard(
+        cardId,
+        {
+          column: "in_progress",
+          runStatus: "credential_refused",
+          outOfScopePaths: [],
+          message: secrets.reason,
+        },
+        stateRoot,
+      );
+      return {
+        ok: false,
+        rejected: true,
+        reason: secrets.reason,
+        pattern: secrets.pattern,
+        index: secrets.index,
+        runStatus: "credential_refused",
+      };
+    }
 
     freshPath = freshWorktreePath(workCopy, cardId);
     if (pathContainsLumen(freshPath)) return refuse("Work copy path contains Lumen.");

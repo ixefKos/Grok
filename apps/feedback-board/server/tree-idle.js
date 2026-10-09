@@ -150,9 +150,15 @@ export function killMarkedProcesses(marker, platform = process.platform, options
   if (!listing.ok) return { ok: false, reason: AGENT_BUSY, killed: [] };
   const killed = [];
   for (const pid of pidsCarryingMarker(listing.stdout, marker)) {
+    const started = readLstart(execImpl, pid);
+    if (!started.ok) return { ok: false, reason: AGENT_BUSY, killed };
+    if (!started.value) continue;
     const again = psText(execImpl, ["-p", String(pid), ...PS_FORMAT], true);
     if (!again.ok) return { ok: false, reason: AGENT_BUSY, killed };
     if (!pidsCarryingMarker(again.stdout, marker).includes(pid)) continue;
+    const startedAgain = readLstart(execImpl, pid);
+    if (!startedAgain.ok) return { ok: false, reason: AGENT_BUSY, killed };
+    if (!startedAgain.value || startedAgain.value !== started.value) continue;
     try {
       killImpl(pid, "SIGKILL");
       killed.push(pid);
@@ -161,4 +167,10 @@ export function killMarkedProcesses(marker, platform = process.platform, options
     }
   }
   return { ok: true, killed };
+}
+
+function readLstart(execImpl, pid) {
+  const result = psText(execImpl, ["-p", String(pid), "-o", "lstart="], true);
+  if (!result.ok) return { ok: false, value: "" };
+  return { ok: true, value: result.stdout.trim() };
 }

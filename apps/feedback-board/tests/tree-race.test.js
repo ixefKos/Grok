@@ -420,6 +420,10 @@ while True:
     const events = [];
     const result = killMarkedProcesses(marker, "darwin", {
       execFileSync: (_bin, args) => {
+        if (args.includes("lstart=")) {
+          events.push("lstart");
+          return "Fri Oct  9 22:00:00 2026\n";
+        }
         events.push(args[0] === "-p" ? "reread" : "scan");
         if (args[0] === "-p") return "  4242 launchd\n";
         return `  4242 sleep ${RUN_MARKER_ENV}=${marker}\n`;
@@ -429,7 +433,7 @@ while True:
     assert.equal(result.ok, true);
     assert.deepEqual(result.killed, []);
     assert.deepEqual(killed, []);
-    assert.deepEqual(events, ["scan", "reread"]);
+    assert.deepEqual(events, ["scan", "lstart", "reread"]);
   });
 
   it("kills a pid only after a re-read still shows the marker", () => {
@@ -438,6 +442,10 @@ while True:
     const events = [];
     const result = killMarkedProcesses(marker, "darwin", {
       execFileSync: (_bin, args) => {
+        if (args.includes("lstart=")) {
+          events.push(`lstart:${args[1]}`);
+          return "Fri Oct  9 22:00:00 2026\n";
+        }
         events.push(args[0] === "-p" ? `reread:${args[1]}` : "scan");
         if (args[0] === "-p") {
           if (args[1] === "5150") return `  5150 python ${RUN_MARKER_ENV}=${marker}\n`;
@@ -452,7 +460,26 @@ while True:
     });
     assert.equal(result.ok, true);
     assert.deepEqual(killed, [5150]);
-    assert.deepEqual(events, ["scan", "reread:5150", "kill:5150:SIGKILL", "reread:6161"]);
+    assert.deepEqual(events, ["scan", "lstart:5150", "reread:5150", "lstart:5150", "kill:5150:SIGKILL", "lstart:6161", "reread:6161"]);
+  });
+
+  it("does not kill when the process start time changed", () => {
+    const marker = "feedbac5";
+    const killed = [];
+    let stamps = 0;
+    const result = killMarkedProcesses(marker, "darwin", {
+      execFileSync: (_bin, args) => {
+        if (args.includes("lstart=")) {
+          stamps += 1;
+          return stamps === 1 ? "Fri Oct  9 22:00:00 2026\n" : "Fri Oct  9 22:00:05 2026\n";
+        }
+        return `  4242 python ${RUN_MARKER_ENV}=${marker}\n`;
+      },
+      kill: (pid) => killed.push(pid),
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(killed, []);
+    assert.deepEqual(result.killed, []);
   });
 
   it("does not kill when the marker re-read fails", () => {
@@ -572,6 +599,11 @@ while True:
       assert.equal(env.TMPDIR, sandbox.tmp);
       assert.equal(env[RUN_MARKER_ENV], "abc");
       assert.equal(env.HOME.includes(`${path.sep}.grok`), false);
+      const stripped = scrubAgentEnv(
+        { XAI_API_KEY: "present", PATH: "/usr/bin" },
+        { home: sandbox.home, tmp: sandbox.tmp },
+      );
+      assert.equal(Object.hasOwn(stripped, "XAI_API_KEY"), false);
       removeAgentTree(sandbox.root);
     } finally {
       fs.rmSync(real, { recursive: true, force: true });

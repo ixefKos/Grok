@@ -128,7 +128,7 @@ export function scrubAgentEnv(source = process.env, options = {}) {
   const env = {};
   for (const [key, value] of Object.entries(source)) {
     if (key === "GH_TOKEN" || key === "GITHUB_TOKEN" || key.startsWith("GH_")) continue;
-    if (key === "GIT_ASKPASS" || key === "SSH_AUTH_SOCK") continue;
+    if (key === "XAI_API_KEY" || key === "GIT_ASKPASS" || key === "SSH_AUTH_SOCK") continue;
     if (typeof value === "string") env[key] = value;
   }
   const sandbox = options.home ? null : prepareAgentSandbox(options.realHome);

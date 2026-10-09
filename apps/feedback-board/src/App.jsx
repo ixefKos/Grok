@@ -22,7 +22,7 @@ async function api(path, options = {}) {
 }
 
 function Card({ card, onStop }) {
-  const blocked = card.runStatus === "out_of_scope";
+  const blocked = card.runStatus === "out_of_scope" || card.runStatus === "credential_refused";
   return (
     <article
       className={blocked ? "card blocked" : "card"}
@@ -58,7 +58,7 @@ function Card({ card, onStop }) {
         <div className="scope">
           <p>{card.message}</p>
           <ul>
-            {card.outOfScopePaths.map((filePath) => (
+            {(card.outOfScopePaths || []).map((filePath) => (
               <li key={filePath}>{filePath}</li>
             ))}
           </ul>

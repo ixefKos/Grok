@@ -1,45 +1,72 @@
-export const CREDENTIAL_REASON = "A file to be published contains a credential.";
+export const CREDENTIAL_RUN_STATUS = "credential_refused";
 
-const MIN_NEEDLE = 8;
+const MIN_SECRET = 20;
+const SECRET_KEY = /token|key|secret|password|credential/i;
+const TOKEN_PATTERN =
+  /(?<![A-Za-z0-9_-])(?:xai-[A-Za-z0-9]{20,}|gh[pos]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})/;
+const PRIVATE_KEY = /-----BEGIN (?:[A-Z0-9]+ ){0,3}PRIVATE KEY(?: BLOCK)?-----/;
 
-const PATTERNS = [
-  /xai-/,
-  /ghp_/,
-  /gho_/,
-  /ghs_/,
-  /github_pat_/,
-  /sk-/,
-  /AKIA/,
-  /-----BEGIN .* PRIVATE KEY-----/,
+const TOKEN_NAMES = [
+  ["xai-", "xai-"],
+  ["github_pat_", "github_pat_"],
+  ["ghp_", "ghp_"],
+  ["gho_", "gho_"],
+  ["ghs_", "ghs_"],
+  ["sk-", "sk-"],
+  ["AKIA", "AKIA"],
 ];
 
-function remember(needles, seen, value) {
+function addNeedle(needles, seen, value) {
   const buf = Buffer.isBuffer(value) ? value : Buffer.from(String(value), "utf8");
-  if (buf.length < MIN_NEEDLE) return;
+  if (buf.length < MIN_SECRET) return;
   const key = buf.toString("latin1");
   if (seen.has(key)) return;
   seen.add(key);
   needles.push(buf);
-  const encoded = Buffer.from(buf.toString("base64"), "utf8");
-  const encodedKey = encoded.toString("latin1");
-  if (encoded.length < MIN_NEEDLE || seen.has(encodedKey)) return;
-  seen.add(encodedKey);
-  needles.push(encoded);
 }
 
-function collectStrings(value, needles, seen, depth) {
+function base64Forms(token) {
+  const forms = [];
+  for (let align = 0; align <= 2; align += 1) {
+    const combined = Buffer.concat([Buffer.alloc(align), token]);
+    const encoded = combined.toString("base64");
+    const first = Math.ceil(align / 3);
+    const last = Math.floor((align + token.length) / 3);
+    if (last <= first) continue;
+    const slice = encoded.slice(first * 4, last * 4);
+    if (slice.length < MIN_SECRET) continue;
+    forms.push(slice);
+    const url = slice.replaceAll("+", "-").replaceAll("/", "_");
+    if (url !== slice) forms.push(url);
+  }
+  return forms;
+}
+
+function rememberSecret(needles, seen, value) {
+  const token = Buffer.from(String(value), "utf8");
+  addNeedle(needles, seen, token);
+  for (const form of base64Forms(token)) addNeedle(needles, seen, form);
+}
+
+function collectSecrets(value, keyName, needles, seen, depth) {
   if (depth > 20) return;
   if (typeof value === "string") {
-    remember(needles, seen, value);
+    if (isSecretKey(keyName) && value.length >= MIN_SECRET) rememberSecret(needles, seen, value);
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) collectStrings(item, needles, seen, depth + 1);
+    for (const item of value) collectSecrets(item, keyName, needles, seen, depth + 1);
     return;
   }
   if (value && typeof value === "object") {
-    for (const item of Object.values(value)) collectStrings(item, needles, seen, depth + 1);
+    for (const [childKey, child] of Object.entries(value)) {
+      collectSecrets(child, childKey, needles, seen, depth + 1);
+    }
   }
+}
+
+function isSecretKey(name) {
+  return SECRET_KEY.test(String(name || ""));
 }
 
 export function authNeedles(authBytes) {
@@ -47,15 +74,12 @@ export function authNeedles(authBytes) {
   const seen = new Set();
   if (!authBytes) return needles;
   const raw = Buffer.isBuffer(authBytes) ? authBytes : Buffer.from(String(authBytes));
-  remember(needles, seen, raw);
   const text = raw.toString("utf8");
   if (!Buffer.from(text, "utf8").equals(raw)) return needles;
-  const trimmed = text.trim();
-  if (trimmed && trimmed !== text) remember(needles, seen, trimmed);
   try {
-    collectStrings(JSON.parse(text), needles, seen, 0);
+    collectSecrets(JSON.parse(text), "", needles, seen, 0);
   } catch {
-    // The auth file is not JSON. The raw bytes are already a needle.
+    // Auth that is not JSON contributes no substring needles.
   }
   return needles;
 }
@@ -66,26 +90,48 @@ function asBuffer(value) {
   return Buffer.alloc(0);
 }
 
-function hits(bytes, needles) {
-  for (const needle of needles) {
-    if (needle.length >= MIN_NEEDLE && bytes.includes(needle)) return true;
+function patternName(text) {
+  if (PRIVATE_KEY.test(text)) return "private-key";
+  const match = TOKEN_PATTERN.exec(text);
+  if (!match) return null;
+  const found = match[0];
+  for (const [prefix, name] of TOKEN_NAMES) {
+    if (found.startsWith(prefix)) return name;
   }
-  const text = bytes.toString("latin1");
-  return PATTERNS.some((pattern) => pattern.test(text));
+  return null;
+}
+
+function classify(bytes, needles) {
+  const kind = patternName(bytes.toString("latin1"));
+  if (kind) return kind;
+  for (const needle of needles) {
+    if (needle.length >= MIN_SECRET && bytes.includes(needle)) return "auth-token";
+  }
+  return null;
 }
 
 export function scanPublishChanges(changes, authBytes) {
   const needles = authNeedles(authBytes);
-  const blocked = [];
-  let found = false;
-  for (const change of changes || []) {
+  const hits = [];
+  const list = changes || [];
+  for (let index = 0; index < list.length; index += 1) {
+    const change = list[index];
     if (!change || typeof change.path !== "string") continue;
-    const pathHit = hits(Buffer.from(change.path), needles);
-    const contentHit = change.kind !== "delete" && change.bytes ? hits(asBuffer(change.bytes), needles) : false;
-    if (!pathHit && !contentHit) continue;
-    found = true;
-    if (!pathHit) blocked.push(change.path);
+    const pathKind = classify(Buffer.from(change.path), needles);
+    const contentKind = change.kind !== "delete" && change.bytes ? classify(asBuffer(change.bytes), needles) : null;
+    const pattern = contentKind || pathKind;
+    if (!pattern) continue;
+    hits.push({ pattern, index });
   }
-  if (!found) return { ok: true, blocked: [] };
-  return { ok: false, reason: CREDENTIAL_REASON, blocked };
+  if (!hits.length) return { ok: true, blocked: [] };
+  const listed = hits.map((hit) => `${hit.pattern} at file ${hit.index}`).join(", ");
+  return {
+    ok: false,
+    reason: `A file to be published contains a credential (${listed}).`,
+    pattern: hits[0].pattern,
+    index: hits[0].index,
+    hits,
+    runStatus: CREDENTIAL_RUN_STATUS,
+    blocked: [],
+  };
 }
