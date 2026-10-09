@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { RUN_MARKER_ENV } from "./tree-idle.js";
 
 export const SANDBOX_PROFILE = "strict";
 export const PUSH_URL = "https://github.com/ixefKos/Grok.git";
@@ -51,14 +52,86 @@ export function buildGrokArgs(prompt, worktreePath) {
   return args;
 }
 
-export function scrubAgentEnv(source = process.env) {
+export function copyGrokAuth(source, dest) {
+  let info;
+  try {
+    info = fs.lstatSync(source);
+  } catch {
+    return false;
+  }
+  if (!info.isFile() || info.isSymbolicLink()) return false;
+  const input = fs.openSync(source, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const output = fs.openSync(
+      dest,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
+      0o444,
+    );
+    try {
+      const buffer = Buffer.alloc(64 * 1024);
+      let position = 0;
+      while (position <= 2 * 1024 * 1024) {
+        const read = fs.readSync(input, buffer, 0, buffer.length, position);
+        if (read <= 0) break;
+        fs.writeSync(output, buffer, 0, read);
+        position += read;
+      }
+      if (position > 2 * 1024 * 1024) {
+        fs.closeSync(output);
+        fs.unlinkSync(dest);
+        return false;
+      }
+    } catch (error) {
+      try {
+        fs.closeSync(output);
+      } catch {
+        // The destination fd is already closed.
+      }
+      try {
+        fs.unlinkSync(dest);
+      } catch {
+        // The partial copy is already gone.
+      }
+      throw error;
+    }
+    fs.closeSync(output);
+  } finally {
+    fs.closeSync(input);
+  }
+  fs.chmodSync(dest, 0o444);
+  return true;
+}
+
+export function prepareAgentSandbox(realHome = os.homedir()) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-board-agent-"));
+  const home = path.join(root, "home");
+  const tmp = path.join(root, "tmp");
+  const grokHome = path.join(home, ".grok");
+  fs.mkdirSync(tmp, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(grokHome, { recursive: true, mode: 0o755 });
+  const authCopied = copyGrokAuth(path.join(realHome, ".grok", "auth.json"), path.join(grokHome, "auth.json"));
+  return { root, home, tmp, grokHome, authCopied };
+}
+
+export function scrubAgentEnv(source = process.env, options = {}) {
   const env = {};
   for (const [key, value] of Object.entries(source)) {
     if (key === "GH_TOKEN" || key === "GITHUB_TOKEN" || key.startsWith("GH_")) continue;
     if (key === "GIT_ASKPASS" || key === "SSH_AUTH_SOCK") continue;
     if (typeof value === "string") env[key] = value;
   }
-  env.GH_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-board-gh-"));
+  const sandbox = options.home ? null : prepareAgentSandbox(options.realHome);
+  const home = options.home || sandbox.home;
+  const tmp = options.tmp || sandbox.tmp;
+  fs.mkdirSync(path.join(home, ".grok"), { recursive: true });
+  fs.mkdirSync(tmp, { recursive: true });
+  env.HOME = home;
+  env.TMPDIR = tmp;
+  env.TMP = tmp;
+  env.GROK_HOME = path.join(home, ".grok");
+  delete env[RUN_MARKER_ENV];
+  if (options.marker) env[RUN_MARKER_ENV] = options.marker;
+  env.GH_CONFIG_DIR = fs.mkdtempSync(path.join(tmp, "feedback-board-gh-"));
   env.GIT_TERMINAL_PROMPT = "0";
   return env;
 }

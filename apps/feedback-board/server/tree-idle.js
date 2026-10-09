@@ -60,34 +60,45 @@ function readLink(file) {
   }
 }
 
-function lsofUsers(root) {
+export const LSOF_BIN = "/usr/sbin/lsof";
+export const LSOF_MAX_BUFFER = 64 * 1024 * 1024;
+
+export function interpretLsofOutput(stdout, root) {
+  const hits = new Set();
+  let pid = "";
+  for (const line of String(stdout || "").split(/\n/)) {
+    if (line.startsWith("p")) pid = line.slice(1).trim();
+    else if (line.startsWith("n") && pid && isInside(root, line.slice(1))) hits.add(pid);
+  }
+  if (hits.size) return { ok: false, reason: AGENT_BUSY, blocked: [...hits] };
+  return { ok: true, blocked: [] };
+}
+
+function runLsof(args, execImpl = execFileSync) {
+  try {
+    const stdout = execImpl(LSOF_BIN, args, {
+      encoding: "utf8",
+      timeout: 15000,
+      maxBuffer: LSOF_MAX_BUFFER,
+    });
+    if (Buffer.byteLength(String(stdout)) >= LSOF_MAX_BUFFER) return { ok: false, stdout: "" };
+    return { ok: true, stdout: String(stdout) };
+  } catch {
+    return { ok: false, stdout: "" };
+  }
+}
+
+export function lsofUsers(root, execImpl = execFileSync) {
   const commands = [
-    ["lsof", ["-nP", "-F", "pn"]],
-    ["lsof", ["-nP", "-a", "-d", "cwd", "-F", "pn"]],
+    ["-nP", "-F", "pn"],
+    ["-nP", "-a", "-d", "cwd", "-F", "pn"],
   ];
   const hits = new Set();
-  for (const [command, args] of commands) {
-    let stdout = "";
-    try {
-      stdout = execFileSync(command, args, {
-        encoding: "utf8",
-        timeout: 15000,
-        maxBuffer: 64 * 1024 * 1024,
-      });
-    } catch (error) {
-      stdout = error && error.stdout ? String(error.stdout) : "";
-      if (!stdout && error && error.code === "ENOENT") {
-        return { ok: false, reason: AGENT_BUSY, blocked: [] };
-      }
-      if (!stdout && error && !error.status) {
-        return { ok: false, reason: AGENT_BUSY, blocked: [] };
-      }
-    }
-    let pid = "";
-    for (const line of String(stdout).split(/\n/)) {
-      if (line.startsWith("p")) pid = line.slice(1).trim();
-      else if (line.startsWith("n") && pid && isInside(root, line.slice(1))) hits.add(pid);
-    }
+  for (const args of commands) {
+    const ran = runLsof(args, execImpl);
+    if (!ran.ok) return { ok: false, reason: AGENT_BUSY, blocked: [] };
+    const parsed = interpretLsofOutput(ran.stdout, root);
+    for (const pid of parsed.blocked || []) hits.add(pid);
   }
   if (hits.size) return { ok: false, reason: AGENT_BUSY, blocked: [...hits] };
   return { ok: true, blocked: [] };
@@ -96,4 +107,45 @@ function lsofUsers(root) {
 export function agentTreeUsers(root) {
   if (process.platform === "linux") return linuxUsers(root);
   return lsofUsers(root);
+}
+
+export const RUN_MARKER_ENV = "FEEDBACK_BOARD_RUN";
+
+export function pidsCarryingMarker(text, marker, selfPid = process.pid) {
+  if (!marker) return [];
+  const needle = `${RUN_MARKER_ENV}=${marker}`;
+  const pids = [];
+  for (const line of String(text || "").split(/\n/)) {
+    if (!line.includes(needle)) continue;
+    const match = line.match(/^\s*(\d+)\b/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    if (pid > 1 && pid !== selfPid) pids.push(pid);
+  }
+  return pids;
+}
+
+export function killMarkedProcesses(marker, platform = process.platform) {
+  if (platform !== "darwin") return { ok: true, killed: [] };
+  if (!marker) return { ok: false, reason: AGENT_BUSY, killed: [] };
+  let stdout = "";
+  try {
+    stdout = execFileSync("/bin/ps", ["-axEww", "-o", "pid=", "-o", "command="], {
+      encoding: "utf8",
+      timeout: 15000,
+      maxBuffer: LSOF_MAX_BUFFER,
+    });
+  } catch {
+    return { ok: false, reason: AGENT_BUSY, killed: [] };
+  }
+  const killed = [];
+  for (const pid of pidsCarryingMarker(stdout, marker)) {
+    try {
+      process.kill(pid, "SIGKILL");
+      killed.push(pid);
+    } catch (error) {
+      if (!error || error.code !== "ESRCH") return { ok: false, reason: AGENT_BUSY, killed };
+    }
+  }
+  return { ok: true, killed };
 }

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { appRoot, loadConfig } from "./config.js";
@@ -8,6 +9,7 @@ import {
   killProcessGroup,
   pullRequestText,
   pushArgs,
+  prepareAgentSandbox,
   reapAgentGroup,
   scrubAgentEnv,
   spawnGrok,
@@ -36,14 +38,18 @@ import {
   symlinkPathsFromRaw,
   symlinkPathsOnDisk,
 } from "./guard.js";
-import { agentTreeUsers } from "./tree-idle.js";
+import { agentTreeUsers, killMarkedProcesses } from "./tree-idle.js";
 import {
   applyTreeChanges,
+  baseContentHashes,
   freshWorktreePath,
   isAllowedRel,
   outsideDrift,
   planTreeChanges,
   readAgentTree,
+  rejectMovedIn,
+  removeAgentTree,
+  snapshotAgentTree,
 } from "./tree-gate.js";
 import { buildAgentPrompt } from "./prompt.js";
 import { mutateState, readState } from "./store.js";
@@ -262,19 +268,36 @@ async function cleanupFailedWorktree(cardId, workCopy, worktreePath, branch) {
   return runCleanup(cardId, workCopy, [args.remove, args.branch, args.prune]);
 }
 
-function discardWorktreeDirectory(worktreePath) {
-  if (!worktreePath) return;
-  fs.rmSync(worktreePath, { recursive: true, force: true });
+const agentBaselines = new Map();
+
+export function rememberAgentBaseline(cardId, baseline) {
+  agentBaselines.set(String(cardId), baseline);
+  return baseline;
 }
 
-async function cleanupPublishTrees(cardId, workCopy, { agentWorktree, freshWorktree, logRoot } = {}) {
-  discardWorktreeDirectory(agentWorktree);
+function agentBaseline(cardId, explicit) {
+  if (explicit) return explicit;
+  return agentBaselines.get(String(cardId)) || null;
+}
+
+async function discardWorktreeDirectory(worktreePath, marker) {
+  if (!worktreePath) return { ok: true };
+  const killed = killMarkedProcesses(marker);
+  if (!killed.ok) return { ok: false, reason: killed.reason || "Could not clean up the worktree." };
+  return removeAgentTree(worktreePath);
+}
+
+async function cleanupPublishTrees(cardId, workCopy, { agentWorktree, freshWorktree, logRoot, marker, sandboxRoot } = {}) {
+  const removed = await discardWorktreeDirectory(agentWorktree, marker);
+  const sandboxRemoved = await discardWorktreeDirectory(sandboxRoot, marker);
   const steps = [];
   if (freshWorktree && fs.existsSync(freshWorktree)) {
     steps.push(["worktree", "remove", "--force", freshWorktree]);
   }
   steps.push(["worktree", "prune"]);
-  return runCleanup(cardId, workCopy, steps, logRoot);
+  const cleaned = await runCleanup(cardId, workCopy, steps, logRoot);
+  if (!removed.ok || !sandboxRemoved.ok) return { ok: false, reason: "Could not clean up the worktree." };
+  return cleaned;
 }
 
 async function recordWorktreeGitDir(cardId, workCopy, worktreePath, logRoot) {
@@ -381,6 +404,23 @@ async function prepareAndSpawn(cardId) {
     return reserved;
   }
 
+  const snap = snapshotAgentTree(worktreePath);
+  if (!snap.ok) {
+    const cleaned = await cleanupFailedWorktree(cardId, config.workCopyPath, worktreePath, branch);
+    await rollbackReservedRun(cardId, reserved.previous, reserved.today || localDay());
+    const error = cleaned.ok ? snap.reason : `${snap.reason} ${cleaned.reason}`;
+    return { ok: false, status: 409, error };
+  }
+  const sandbox = prepareAgentSandbox();
+  const marker = crypto.randomBytes(16).toString("hex");
+  const spawnTime = Date.now() / 1000;
+  rememberAgentBaseline(cardId, {
+    inodes: snap.inodes,
+    spawnTime,
+    marker,
+    sandboxRoot: sandbox.root,
+  });
+
   const prompt = buildAgentPrompt(card);
   appendLog(
     cardId,
@@ -390,7 +430,7 @@ async function prepareAndSpawn(cardId) {
     command: config.grokCommand,
     prompt,
     worktreePath,
-    env: scrubAgentEnv(process.env),
+    env: scrubAgentEnv(process.env, { home: sandbox.home, tmp: sandbox.tmp, marker }),
     contain: true,
   });
   const stopFlag = { stopped: false };
@@ -429,6 +469,19 @@ async function prepareAndSpawn(cardId) {
             message: `The run exited with code ${code ?? "null"}${signal ? ` (${signal})` : ""}.`,
           });
           return;
+        }
+        const baseline = agentBaseline(cardId);
+        if (baseline && baseline.marker) {
+          const killed = killMarkedProcesses(baseline.marker);
+          if (!killed.ok) {
+            await markCard(cardId, {
+              column: "in_progress",
+              runStatus: "out_of_scope",
+              outOfScopePaths: killed.killed || [],
+              message: killed.reason,
+            });
+            return;
+          }
         }
         const busy = agentTreeUsers(worktreePath);
         if (!busy.ok) {
@@ -675,9 +728,11 @@ export async function publishAgentTree({
   push = true,
   openPullRequest = true,
   stateRoot,
+  baseline: baselineOption,
 } = {}) {
   let freshPath = null;
   let rejection = null;
+  const baseline = agentBaseline(cardId, baselineOption);
   const refuse = async (reason, blocked = []) => {
     rejection = reason;
     await markTreeRejected(cardId, reason, blocked, stateRoot);
@@ -691,14 +746,24 @@ export async function publishAgentTree({
     if (pathIsTempOrGrok(workCopy) || pathIsTempOrGrok(agentWorktree)) {
       return refuse("Work copy path is under a temporary or Grok directory.");
     }
+    if (baseline && baseline.marker) {
+      const killed = killMarkedProcesses(baseline.marker);
+      if (!killed.ok) return refuse(killed.reason, killed.killed || []);
+    }
     const busy = agentTreeUsers(agentWorktree);
     if (!busy.ok) return refuse(busy.reason, busy.blocked);
-    const inspected = await readAgentTree(agentWorktree);
+    const base = await readBaseSnapshot(cardId, workCopy, baseSha, stateRoot);
+    const inspected = await readAgentTree(agentWorktree, {
+      inodes: baseline ? baseline.inodes : [],
+      spawnTime: baseline ? baseline.spawnTime : null,
+      base: baseContentHashes(base.blobs),
+    });
     const busyAfter = agentTreeUsers(agentWorktree);
     if (!busyAfter.ok) return refuse(busyAfter.reason, busyAfter.blocked);
     if (!inspected.ok) return refuse(inspected.reason, inspected.blocked);
+    const moved = rejectMovedIn(inspected, baseline, base.blobs);
+    if (moved) return refuse(moved.reason, moved.blocked);
 
-    const base = await readBaseSnapshot(cardId, workCopy, baseSha, stateRoot);
     const drift = outsideDrift(inspected.agentFiles, base.paths);
     if (!drift.ok) return refuse(drift.reason, drift.blocked);
     const planned = planTreeChanges(inspected.allowed, base.blobs, [...base.blobs.keys()]);
@@ -719,7 +784,8 @@ export async function publishAgentTree({
     if (pathContainsLumen(freshPath)) return refuse("Work copy path contains Lumen.");
     if (pathIsTempOrGrok(freshPath)) return refuse("Work copy path is under a temporary or Grok directory.");
 
-    discardWorktreeDirectory(agentWorktree);
+    const removed = await discardWorktreeDirectory(agentWorktree, baseline && baseline.marker);
+    if (!removed.ok) throw new Error(removed.reason || "Could not clean up the worktree.");
     const pruned = await boardGit(cardId, ["worktree", "prune"], {
       cwd: workCopy,
       timeoutMs: 120000,
@@ -759,6 +825,8 @@ export async function publishAgentTree({
       agentWorktree,
       freshWorktree: freshPath,
       logRoot: stateRoot,
+      marker: baseline && baseline.marker,
+      sandboxRoot: baseline && baseline.sandboxRoot,
     });
     if (!cleaned.ok) {
       const message = rejection ? `${rejection} ${cleaned.reason}` : cleaned.reason;

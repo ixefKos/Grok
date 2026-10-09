@@ -7,8 +7,9 @@ import { promisify } from "node:util";
 import { describe, it } from "node:test";
 import { observeProcesses } from "../server/exec.js";
 import { mutateState, readState } from "../server/store.js";
-import { freshWorktreePath, inspectAgentTree } from "../server/tree-gate.js";
-import { publishAgentTree } from "../server/runs.js";
+import os from "node:os";
+import { freshWorktreePath, inspectAgentTree, snapshotAgentTree } from "../server/tree-gate.js";
+import { publishAgentTree, rememberAgentBaseline } from "../server/runs.js";
 
 const execFileAsync = promisify(execFile);
 const CARD_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -46,7 +47,7 @@ async function git(cwd, args) {
 }
 
 async function setupRepo() {
-  const parent = fs.mkdtempSync(path.join("/home/ubuntu", "fb-tree-"));
+  const parent = fs.mkdtempSync(path.join(os.homedir(), "fb-tree-"));
   const repo = path.join(parent, "repo");
   const agent = path.join(parent, "agent");
   const stateRoot = path.join(parent, "state");
@@ -60,6 +61,9 @@ async function setupRepo() {
   await git(repo, ["commit", "-m", "init"]);
   const baseSha = (await git(repo, ["rev-parse", "HEAD"])).trim();
   await git(repo, ["worktree", "add", "-b", BRANCH, agent, baseSha]);
+  const snap = snapshotAgentTree(agent);
+  if (!snap.ok) throw new Error(snap.reason);
+  rememberAgentBaseline(CARD_ID, { inodes: snap.inodes, spawnTime: Date.now() / 1000 });
   await mutateState((state) => {
     state.cards.push({
       id: CARD_ID,
@@ -75,7 +79,7 @@ async function setupRepo() {
 
 describe("agent tree publish", { concurrency: 1 }, () => {
   it("refuses a symlink, a socket, and a .gitattributes file", async () => {
-    const root = fs.mkdtempSync(path.join("/home/ubuntu", "fb-tree-inspect-"));
+    const root = fs.mkdtempSync(path.join(os.homedir(), "fb-tree-inspect-"));
     const folder = path.join(root, "apps", "feedback-board");
     fs.mkdirSync(folder, { recursive: true });
     try {

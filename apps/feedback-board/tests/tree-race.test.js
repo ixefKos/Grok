@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { agentSpawnPlan } from "../server/agent-launch.js";
+import { agentSpawnPlan, copyGrokAuth, prepareAgentSandbox, scrubAgentEnv } from "../server/agent-launch.js";
 import { mutateState, readState } from "../server/store.js";
-import { applyTreeChanges, inspectAgentTree } from "../server/tree-gate.js";
+import { applyTreeChanges, inspectAgentTree, removeAgentTree, snapshotAgentTree } from "../server/tree-gate.js";
+import { LSOF_BIN, RUN_MARKER_ENV, interpretLsofOutput, killMarkedProcesses, lsofUsers, pidsCarryingMarker } from "../server/tree-idle.js";
 import { publishAgentTree } from "../server/runs.js";
 
 const SECRET = "FB-RACE-CANARY-9f3c1a7b";
@@ -125,7 +127,7 @@ while True:
 `;
 
     async function runRace(label, prepare, source, argBuilder) {
-      const parent = fs.mkdtempSync(path.join("/home/ubuntu", "fb-race-"));
+      const parent = fs.mkdtempSync(path.join(os.homedir(), "fb-race-"));
       const root = path.join(parent, "tree");
       const secretFile = path.join(parent, "secret.txt");
       const secretDir = path.join(parent, "secret-dir");
@@ -137,7 +139,7 @@ while True:
       fs.writeFileSync(script, source);
       prepare(root);
       const child = spawn("python3", [script, ...argBuilder(root, secretFile, secretDir)], {
-        cwd: "/home/ubuntu",
+        cwd: os.homedir(),
         detached: true,
         stdio: "ignore",
       });
@@ -200,7 +202,7 @@ while True:
   });
 
   it("refuses a hardlink, a backslash, a newline, a fifo, and a case-variant metadata name", () => {
-    const root = fs.mkdtempSync(path.join("/home/ubuntu", "fb-meta-"));
+    const root = fs.mkdtempSync(path.join(os.homedir(), "fb-meta-"));
     const folder = path.join(root, "apps", "feedback-board");
     const secret = path.join(root, "secret.txt");
     fs.mkdirSync(folder, { recursive: true });
@@ -238,8 +240,8 @@ while True:
   });
 
   it("does not follow a symlink while writing the fresh tree", () => {
-    const root = fs.mkdtempSync(path.join("/home/ubuntu", "fb-write-"));
-    const outside = fs.mkdtempSync(path.join("/home/ubuntu", "fb-outside-"));
+    const root = fs.mkdtempSync(path.join(os.homedir(), "fb-write-"));
+    const outside = fs.mkdtempSync(path.join(os.homedir(), "fb-outside-"));
     const secret = path.join(outside, "secret.txt");
     fs.writeFileSync(secret, `${SECRET}\n`);
     fs.mkdirSync(path.join(root, "apps", "feedback-board"), { recursive: true });
@@ -266,7 +268,7 @@ while True:
   });
 
   it("refuses to publish while a setsid child is still writing", async () => {
-    const parent = fs.mkdtempSync(path.join("/home/ubuntu", "fb-live-"));
+    const parent = fs.mkdtempSync(path.join(os.homedir(), "fb-live-"));
     const repo = path.join(parent, "repo");
     const agent = path.join(parent, "agent");
     const stateRoot = path.join(parent, "state");
@@ -289,8 +291,8 @@ while True:
       });
     }, stateRoot);
     const writer = spawn(
-      "setsid",
-      ["bash", "-c", "while true; do printf x >> apps/feedback-board/keep.txt; sleep 0.05; done"],
+      "python3",
+      ["-c", "import os, time\ntry:\n    os.setsid()\nexcept OSError:\n    pass\nwhile True:\n    open('apps/feedback-board/keep.txt','a').write('x')\n    time.sleep(0.05)\n"],
       { cwd: agent, detached: true, stdio: "ignore" },
     );
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -317,8 +319,8 @@ while True:
     }
   });
 
-  it("kills a setsid grandchild when the contained agent exits", async () => {
-    const marker = path.join("/home/ubuntu", `fb-contained-${process.pid}`);
+  it("kills a setsid grandchild when the contained agent exits", { skip: process.platform !== "linux" }, async () => {
+    const marker = path.join(os.homedir(), `fb-contained-${process.pid}`);
     fs.rmSync(marker, { force: true });
     const plan = agentSpawnPlan("bash", ["-c", `setsid bash -c 'sleep 8; echo alive > ${marker}' >/dev/null 2>&1 & exit 0`]);
     assert.equal(plan.contained, true);
@@ -332,5 +334,162 @@ while True:
     assert.equal(fs.existsSync(marker), false);
     const listing = execFileSync("ps", ["-eo", "args"], { encoding: "utf8" });
     assert.equal(listing.includes(marker), false);
+  });
+
+  it("does not follow a symlink while removing an agent tree", () => {
+    const parent = fs.mkdtempSync(path.join(os.homedir(), "fb-rm-"));
+    const tree = path.join(parent, "tree");
+    const outside = path.join(parent, "outside");
+    fs.mkdirSync(path.join(tree, "apps", "feedback-board", "nested"), { recursive: true });
+    fs.mkdirSync(outside);
+    const secret = path.join(outside, "secret.txt");
+    fs.writeFileSync(secret, `${SECRET}\n`);
+    fs.writeFileSync(path.join(tree, "apps", "feedback-board", "nested", "note.txt"), "public\n");
+    fs.rmSync(path.join(tree, "apps", "feedback-board", "nested"), { recursive: true, force: true });
+    fs.symlinkSync(outside, path.join(tree, "apps", "feedback-board", "nested"));
+    try {
+      const removed = removeAgentTree(tree);
+      assert.equal(removed.ok, true);
+      assert.equal(fs.existsSync(tree), false);
+      assert.equal(fs.readFileSync(secret, "utf8"), `${SECRET}\n`);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a file moved in from outside the recorded tree", () => {
+    const parent = fs.mkdtempSync(path.join(os.homedir(), "fb-moved-"));
+    const root = path.join(parent, "tree");
+    const folder = path.join(root, "apps", "feedback-board");
+    fs.mkdirSync(folder, { recursive: true });
+    const keep = path.join(folder, "keep.txt");
+    fs.writeFileSync(keep, "public\n");
+    const snap = snapshotAgentTree(root);
+    assert.equal(snap.ok, true);
+    const later = Date.now() / 1000 + 30;
+    fs.writeFileSync(keep, "edited\n");
+    const edited = inspectAgentTree(root, { inodes: snap.inodes, spawnTime: later, base: {} });
+    assert.equal(edited.ok, true);
+    assert.equal(edited.allowed.get("apps/feedback-board/keep.txt").toString(), "edited\n");
+    const secret = path.join(parent, "auth.json");
+    fs.writeFileSync(secret, `${SECRET}\n`);
+    const notes = path.join(folder, "notes.txt");
+    fs.renameSync(secret, notes);
+    try {
+      const moved = inspectAgentTree(root, { inodes: snap.inodes, spawnTime: later, base: {} });
+      assert.equal(moved.ok, false);
+      assert.match(moved.reason, /moved in/);
+      assert.equal(leaked(moved), false);
+      fs.unlinkSync(notes);
+      fs.writeFileSync(path.join(folder, "fresh.txt"), "agent\n");
+      const created = inspectAgentTree(root, { inodes: snap.inodes, spawnTime: Date.now() / 1000 - 1, base: {} });
+      assert.equal(created.ok, true);
+      assert.equal(created.allowed.get("apps/feedback-board/fresh.txt").toString(), "agent\n");
+      assert.equal(created.allowed.get("apps/feedback-board/keep.txt").toString(), "edited\n");
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("treats an lsof timeout, a short read, and an empty failure as busy", () => {
+    const root = path.join(os.homedir(), "fb-lsof-root");
+    const boom = (error) => () => {
+      throw error;
+    };
+    assert.equal(lsofUsers(root, boom(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }))).ok, false);
+    assert.equal(lsofUsers(root, boom(Object.assign(new Error("buf"), { code: "ENOBUFS" }))).ok, false);
+    assert.equal(
+      lsofUsers(root, boom(Object.assign(new Error("trunc"), { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER", stdout: "p1\n" }))).ok,
+      false,
+    );
+    assert.equal(lsofUsers(root, boom(Object.assign(new Error("empty"), { status: 1, stdout: "" }))).ok, false);
+    const quiet = () => "";
+    assert.equal(lsofUsers(root, quiet).ok, true);
+    const hit = () => `p42\nn${root}/apps/feedback-board/keep.txt\n`;
+    const busy = lsofUsers(root, hit);
+    assert.equal(busy.ok, false);
+    assert.deepEqual(busy.blocked, ["42"]);
+    const parsed = interpretLsofOutput(`p7\nn${root}\n`, root);
+    assert.equal(parsed.ok, false);
+    assert.equal(LSOF_BIN, "/usr/sbin/lsof");
+  });
+
+  it("finds processes by the run marker and kills them on darwin", { skip: process.platform !== "darwin" }, async () => {
+    const marker = `m${process.pid.toString(16)}`;
+    const listing = `    1 launchd\n   77 ${RUN_MARKER_ENV}=other\n  ${process.pid} ${RUN_MARKER_ENV}=${marker}\n  4242 python ${RUN_MARKER_ENV}=${marker}\n`;
+    assert.deepEqual(pidsCarryingMarker(listing, marker), [4242]);
+    const child = spawn(
+      "python3",
+      ["-c", "import os, time\nos.setsid()\nos.chdir('/')\nfd=os.open('/dev/null', os.O_RDWR)\nos.dup2(fd, 0)\nos.dup2(fd, 1)\nos.dup2(fd, 2)\ntime.sleep(30)\n"],
+      { env: { [RUN_MARKER_ENV]: marker, PATH: process.env.PATH }, detached: true, stdio: "ignore" },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    try {
+      const killed = killMarkedProcesses(marker);
+      assert.equal(killed.ok, true);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      let alive = true;
+      try {
+        process.kill(child.pid, 0);
+      } catch (error) {
+        alive = error.code !== "ESRCH";
+      }
+      assert.equal(alive, false);
+    } finally {
+      try {
+        process.kill(child.pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  });
+
+  it("scans open files with lsof on darwin", { skip: process.platform !== "darwin" }, async () => {
+    const dir = fs.mkdtempSync(path.join(os.homedir(), "fb-lsof-"));
+    const child = spawn("sleep", ["30"], { cwd: dir, detached: true, stdio: "ignore" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    try {
+      const idle = lsofUsers(os.homedir());
+      assert.equal(typeof idle.ok, "boolean");
+      const busy = lsofUsers(dir);
+      assert.equal(busy.ok, false);
+    } finally {
+      try {
+        process.kill(child.pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("copies only grok auth into a private home", () => {
+    const real = fs.mkdtempSync(path.join(os.homedir(), "fb-auth-"));
+    const grok = path.join(real, ".grok");
+    fs.mkdirSync(grok);
+    fs.writeFileSync(path.join(grok, "auth.json"), "token-value\n", { mode: 0o600 });
+    fs.writeFileSync(path.join(grok, "mcp_credentials.json"), "mcp-secret\n");
+    fs.symlinkSync(path.join(grok, "auth.json"), path.join(grok, "linked.json"));
+    try {
+      const sandbox = prepareAgentSandbox(real);
+      const copied = path.join(sandbox.grokHome, "auth.json");
+      assert.equal(sandbox.authCopied, true);
+      assert.equal(fs.readFileSync(copied, "utf8"), "token-value\n");
+      assert.equal(fs.statSync(copied).mode & 0o777, 0o444);
+      assert.equal(fs.existsSync(path.join(sandbox.grokHome, "mcp_credentials.json")), false);
+      assert.equal(copyGrokAuth(path.join(grok, "linked.json"), path.join(sandbox.grokHome, "nope.json")), false);
+      const env = scrubAgentEnv(
+        { HOME: real, GROK_HOME: grok, TMPDIR: os.tmpdir(), PATH: "/usr/bin" },
+        { home: sandbox.home, tmp: sandbox.tmp, marker: "abc" },
+      );
+      assert.equal(env.HOME, sandbox.home);
+      assert.equal(env.GROK_HOME, sandbox.grokHome);
+      assert.equal(env.TMPDIR, sandbox.tmp);
+      assert.equal(env[RUN_MARKER_ENV], "abc");
+      assert.equal(env.HOME.includes(`${path.sep}.grok`), false);
+      removeAgentTree(sandbox.root);
+    } finally {
+      fs.rmSync(real, { recursive: true, force: true });
+    }
   });
 });

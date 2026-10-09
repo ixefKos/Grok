@@ -185,6 +185,10 @@ for (const line of lines) console.log(line);
     assert.deepEqual(fs.readdirSync(report.ghConfigDir), []);
     assert.equal(report.pgid, report.pid);
     assert.equal(prompt.includes(card.title), true);
+    assert.notEqual(env.HOME, process.env.HOME);
+    assert.equal(env.GROK_HOME, `${env.HOME}/.grok`);
+    assert.equal(env.TMPDIR, env.TMP);
+    assert.equal(env.TMPDIR.startsWith(os.tmpdir()), true);
   });
 
   it("matches the deny rules for push, gh, and a compound command", () => {

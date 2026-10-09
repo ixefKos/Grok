@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runProcess } from "./exec.js";
@@ -16,7 +18,30 @@ export function isAllowedRel(rel) {
 }
 
 function emptyWalk(reason) {
-  return { ok: false, reason, blocked: [], agentFiles: [], allowed: new Map() };
+  return { ok: false, reason, blocked: [], agentFiles: [], allowed: new Map(), meta: new Map() };
+}
+
+function policyFile(policy) {
+  if (!policy) return { args: [], cleanup() {} };
+  const file = path.join(os.tmpdir(), `feedback-board-policy-${crypto.randomBytes(8).toString("hex")}.json`);
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      inodes: policy.inodes || [],
+      spawn: Number.isFinite(policy.spawnTime) ? policy.spawnTime : null,
+      base: policy.base || {},
+    }),
+  );
+  return {
+    args: ["walk", file],
+    cleanup() {
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        // The policy file is already gone.
+      }
+    },
+  };
 }
 
 export function decodeTreeWalk(buffer) {
@@ -33,9 +58,11 @@ export function decodeTreeWalk(buffer) {
       blocked: payload && Array.isArray(payload.blocked) ? payload.blocked : [],
       agentFiles: [],
       allowed: new Map(),
+      meta: new Map(),
     };
   }
   const allowed = new Map();
+  const meta = new Map();
   const agentFiles = [];
   for (const file of payload.files || []) {
     if (!file || typeof file.rel !== "string" || typeof file.bytes !== "string") {
@@ -45,6 +72,11 @@ export function decodeTreeWalk(buffer) {
     const bytes = Buffer.from(file.bytes, "base64");
     if (bytes.length > MAX_FILE_BYTES) return emptyWalk("Agent tree contains a file over the size cap.");
     allowed.set(file.rel, bytes);
+    meta.set(file.rel, {
+      dev: file.dev == null ? "" : String(file.dev),
+      ino: file.ino == null ? "" : String(file.ino),
+      birth: typeof file.birth === "number" ? file.birth : null,
+    });
     agentFiles.push(file.rel);
   }
   for (const rel of payload.outside || []) {
@@ -54,22 +86,34 @@ export function decodeTreeWalk(buffer) {
   if (allowed.size > MAX_TREE_FILES) {
     return emptyWalk("Agent tree contains more than 200 files in the allowed folders.");
   }
-  return { ok: true, reason: null, blocked: [], agentFiles, allowed };
+  return { ok: true, reason: null, blocked: [], agentFiles, allowed, meta };
 }
 
-export function inspectAgentTree(root) {
-  const result = spawnSync("python3", [WALK_SCRIPT, root], {
-    cwd: path.dirname(WALK_SCRIPT),
-    timeout: 20000,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (result.error || result.signal || result.status !== 0) return emptyWalk("Could not read the agent tree.");
-  return decodeTreeWalk(result.stdout);
+function pythonWalk(root, policy) {
+  const policyArgs = policyFile(policy);
+  const args = policy ? ["walk", root, ...policyArgs.args.slice(1)] : [root];
+  return { args, cleanup: policyArgs.cleanup };
 }
 
-export async function readAgentTree(root) {
+export function inspectAgentTree(root, policy) {
+  const planned = pythonWalk(root, policy);
   try {
-    const result = await runProcess("python3", [WALK_SCRIPT, root], {
+    const result = spawnSync("python3", [WALK_SCRIPT, ...planned.args], {
+      cwd: path.dirname(WALK_SCRIPT),
+      timeout: 20000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    if (result.error || result.signal || result.status !== 0) return emptyWalk("Could not read the agent tree.");
+    return decodeTreeWalk(result.stdout);
+  } finally {
+    planned.cleanup();
+  }
+}
+
+export async function readAgentTree(root, policy) {
+  const planned = pythonWalk(root, policy);
+  try {
+    const result = await runProcess("python3", [WALK_SCRIPT, ...planned.args], {
       timeoutMs: 20000,
       cwd: path.dirname(WALK_SCRIPT),
     });
@@ -77,7 +121,76 @@ export async function readAgentTree(root) {
     return decodeTreeWalk(result.stdoutBuffer);
   } catch {
     return emptyWalk("Could not read the agent tree.");
+  } finally {
+    planned.cleanup();
   }
+}
+
+export function snapshotAgentTree(root) {
+  const result = spawnSync("python3", [WALK_SCRIPT, "snapshot", root], {
+    cwd: path.dirname(WALK_SCRIPT),
+    timeout: 20000,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.error || result.signal || result.status !== 0) {
+    return { ok: false, reason: "Could not read the agent tree.", inodes: [] };
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(result.stdout || "").toString("utf8"));
+    if (!payload || payload.ok !== true || !Array.isArray(payload.inodes)) {
+      return { ok: false, reason: "Could not read the agent tree.", inodes: [] };
+    }
+    return { ok: true, inodes: payload.inodes.map((inode) => String(inode)) };
+  } catch {
+    return { ok: false, reason: "Could not read the agent tree.", inodes: [] };
+  }
+}
+
+export function removeAgentTree(root) {
+  if (!root) return { ok: true };
+  const result = spawnSync("python3", [WALK_SCRIPT, "rmtree", root], {
+    cwd: path.dirname(WALK_SCRIPT),
+    timeout: 20000,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.error || result.signal || result.status !== 0) {
+    return { ok: false, reason: "Could not remove the agent tree." };
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(result.stdout || "").toString("utf8"));
+    if (!payload || payload.ok !== true) return { ok: false, reason: "Could not remove the agent tree." };
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "Could not remove the agent tree." };
+  }
+}
+
+export function baseContentHashes(blobs) {
+  const base = {};
+  for (const [rel, bytes] of blobs || []) {
+    base[rel] = crypto.createHash("sha256").update(bytes).digest("hex");
+  }
+  return base;
+}
+
+export function rejectMovedIn(inspected, baseline, blobs) {
+  const inodes = new Set((baseline && baseline.inodes) || []);
+  const spawn = baseline && Number.isFinite(baseline.spawnTime) ? baseline.spawnTime : null;
+  const blocked = [];
+  for (const [rel, bytes] of inspected.allowed || []) {
+    const base = blobs && blobs.get(rel);
+    if (base && Buffer.isBuffer(base) && base.equals(bytes)) continue;
+    const meta = inspected.meta && inspected.meta.get(rel);
+    if (meta && meta.dev && meta.ino && inodes.has(`${meta.dev}:${meta.ino}`)) continue;
+    if (meta && spawn !== null && typeof meta.birth === "number" && meta.birth >= spawn) continue;
+    blocked.push(rel);
+  }
+  if (!blocked.length) return null;
+  return {
+    ok: false,
+    reason: "Agent tree contains a file moved in from outside this run.",
+    blocked,
+  };
 }
 
 export function outsideDrift(agentFiles, baseFiles) {
