@@ -9,6 +9,7 @@ import {
   killProcessGroup,
   pullRequestText,
   pushArgs,
+  droppedCredentialValues,
   prepareAgentSandbox,
   reapAgentGroup,
   scrubAgentEnv,
@@ -421,6 +422,7 @@ async function prepareAndSpawn(cardId) {
     marker,
     sandboxRoot: sandbox.root,
     authBytes: sandbox.authBytes,
+    envSecrets: droppedCredentialValues(process.env),
   });
 
   const prompt = buildAgentPrompt(card);
@@ -781,7 +783,11 @@ export async function publishAgentTree({
       );
       return { ok: true, noChanges: true, sha: baseSha };
     }
-    const secrets = scanPublishChanges(planned.changes, baseline && baseline.authBytes);
+    const secrets = scanPublishChanges(
+      planned.changes,
+      baseline && baseline.authBytes,
+      baseline && baseline.envSecrets,
+    );
     if (!secrets.ok) {
       rejection = secrets.reason;
       appendLog(cardId, `${secrets.reason}\n`, stateRoot);

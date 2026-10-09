@@ -124,11 +124,28 @@ export function prepareAgentSandbox(realHome = os.homedir()) {
   return { root, home, tmp, grokHome, authCopied: Boolean(authBytes), authBytes: authBytes || null };
 }
 
+const AGENT_ENV_EXACT = new Set(["PATH", "LANG", "TERM", "TZ", "USER", "SHELL"]);
+const SECRET_ENV_NAME = /(TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL)S?$|^AWS_/i;
+
+export function isAllowedAgentEnvKey(key) {
+  return AGENT_ENV_EXACT.has(key) || String(key).startsWith("LC_");
+}
+
+export function droppedCredentialValues(source = process.env) {
+  const values = [];
+  for (const [key, value] of Object.entries(source || {})) {
+    if (isAllowedAgentEnvKey(key)) continue;
+    if (typeof value !== "string" || value.length < 20) continue;
+    if (!SECRET_ENV_NAME.test(key)) continue;
+    values.push(value);
+  }
+  return values;
+}
+
 export function scrubAgentEnv(source = process.env, options = {}) {
   const env = {};
-  for (const [key, value] of Object.entries(source)) {
-    if (key === "GH_TOKEN" || key === "GITHUB_TOKEN" || key.startsWith("GH_")) continue;
-    if (key === "XAI_API_KEY" || key === "GIT_ASKPASS" || key === "SSH_AUTH_SOCK") continue;
+  for (const [key, value] of Object.entries(source || {})) {
+    if (!isAllowedAgentEnvKey(key)) continue;
     if (typeof value === "string") env[key] = value;
   }
   const sandbox = options.home ? null : prepareAgentSandbox(options.realHome);
@@ -138,12 +155,8 @@ export function scrubAgentEnv(source = process.env, options = {}) {
   fs.mkdirSync(tmp, { recursive: true });
   env.HOME = home;
   env.TMPDIR = tmp;
-  env.TMP = tmp;
   env.GROK_HOME = path.join(home, ".grok");
-  delete env[RUN_MARKER_ENV];
   if (options.marker) env[RUN_MARKER_ENV] = options.marker;
-  env.GH_CONFIG_DIR = fs.mkdtempSync(path.join(tmp, "feedback-board-gh-"));
-  env.GIT_TERMINAL_PROMPT = "0";
   return env;
 }
 

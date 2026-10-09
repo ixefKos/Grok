@@ -8,8 +8,10 @@ import { describe, it } from "node:test";
 import { observeProcesses } from "../server/exec.js";
 import { mutateState, readState } from "../server/store.js";
 import { snapshotAgentTree } from "../server/tree-gate.js";
+import { droppedCredentialValues, scrubAgentEnv } from "../server/agent-launch.js";
 import { CREDENTIAL_RUN_STATUS, scanPublishChanges } from "../server/credential-scan.js";
 import { publishAgentTree, rememberAgentBaseline } from "../server/runs.js";
+import { RUN_MARKER_ENV } from "../server/tree-idle.js";
 
 const execFileAsync = promisify(execFile);
 const CARD_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
@@ -191,6 +193,88 @@ describe("credential scan", () => {
     assert.equal(scanPublishChanges([{ path: NOTE, kind: "add", bytes: test }], AUTH).ok, true);
   });
 
+  it("matches a token after a hyphen or underscore, except sk-", () => {
+    const prefixed = [
+      ["xai-", "-" + repeat("xai-", 20, "A")],
+      ["ghp_", "_" + repeat("ghp_", 36, "a")],
+      ["github_pat_", "-" + repeat("github_pat_", 22, "d")],
+      ["AKIA", "_" + repeat("AKIA", 16, "F")],
+    ];
+    for (const [name, text] of prefixed) {
+      const result = scanPublishChanges([{ path: NOTE, kind: "add", bytes: Buffer.from(text) }], null);
+      assertHit(result, name, 0, [text]);
+    }
+    for (const prefix of ["-", "_"]) {
+      const text = prefix + repeat("sk-", 20, "e");
+      const result = scanPublishChanges([{ path: NOTE, kind: "add", bytes: Buffer.from(text) }], null);
+      assert.equal(result.ok, true, prefix);
+    }
+  });
+
+  it("treats a nested credentials value as a secret", () => {
+    const nested = Buffer.from(`${JSON.stringify({ credentials: { default: TOKEN } })}\n`);
+    const result = scanPublishChanges([{ path: NOTE, kind: "add", bytes: Buffer.from(TOKEN) }], nested);
+    assertHit(result, "auth-token", 0, [TOKEN]);
+    const plain = Buffer.from(`${JSON.stringify({ profile: { default: TOKEN } })}\n`);
+    const missed = scanPublishChanges([{ path: NOTE, kind: "add", bytes: Buffer.from(TOKEN) }], plain);
+    assert.equal(missed.ok, true);
+  });
+
+  it("passes only the allowlist and refuses a dropped env secret", () => {
+    const aws = "aws-dropped-" + "value-0001";
+    const npm = "npm-dropped-" + "value-0002";
+    const anthropic = "ant-dropped-" + "value-0003";
+    const openai = "oai-dropped-" + "value-0004";
+    const shortAws = "short-aws-value";
+    const parent = {
+      PATH: "/usr/bin",
+      LANG: "C",
+      LC_ALL: "C.UTF-8",
+      TERM: "xterm",
+      TZ: "UTC",
+      USER: "board",
+      SHELL: "/bin/sh",
+      HOME: "/real/home",
+      TMPDIR: "/real/tmp",
+      TMP: "/real/tmp",
+      EDITOR: "vim",
+      AWS_SECRET_ACCESS_KEY: aws,
+      NPM_TOKEN: npm,
+      ANTHROPIC_API_KEY: anthropic,
+      OPENAI_API_KEY: openai,
+      XAI_API_KEY: "present",
+      GH_TOKEN: "poison-gh-token-value",
+      GIT_ASKPASS: "/tmp/askpass",
+      AWS_SESSION: shortAws,
+    };
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fb-env-"));
+    const home = path.join(root, "home");
+    const tmp = path.join(root, "tmp");
+    try {
+      const env = scrubAgentEnv(parent, { home, tmp, marker: "abc" });
+      assert.deepEqual(
+        Object.keys(env).sort(),
+        ["GROK_HOME", "HOME", "LANG", "LC_ALL", "PATH", RUN_MARKER_ENV, "SHELL", "TERM", "TMPDIR", "TZ", "USER"].sort(),
+      );
+      assert.equal(env.HOME, home);
+      assert.equal(env.TMPDIR, tmp);
+      assert.equal(env.GROK_HOME, `${home}/.grok`);
+      assert.equal(env.PATH, "/usr/bin");
+      assert.equal(env[RUN_MARKER_ENV], "abc");
+      assert.equal(Object.hasOwn(env, "TMP"), false);
+      assert.equal(Object.hasOwn(env, "XAI_API_KEY"), false);
+      const secrets = [aws, npm, anthropic, openai, "poison-gh-token-value"];
+      for (const secret of secrets) assert.equal(Object.values(env).includes(secret), false);
+      const dropped = droppedCredentialValues(parent);
+      const result = scanPublishChanges([{ path: NOTE, kind: "add", bytes: Buffer.from(aws) }], null, dropped);
+      assertHit(result, "auth-token", 0, secrets);
+      const shortHit = scanPublishChanges([{ path: NOTE, kind: "add", bytes: Buffer.from(shortAws) }], null, dropped);
+      assert.equal(shortHit.ok, true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports a credential path by index", () => {
     const text = repeat("xai-", 20, "A");
     const result = scanPublishChanges(
@@ -219,6 +303,11 @@ describe("credential publish", { concurrency: 1 }, () => {
     await assertRefused(Buffer.from(planted), "auth-token", [TOKEN, planted]);
   });
 
+  it("refuses a publish containing a dropped environment secret", async () => {
+    const secret = "aws-dropped-" + "value-0001";
+    await assertRefused(Buffer.from(secret), "auth-token", [secret], { authBytes: null, envSecrets: [secret] });
+  });
+
   it("publishes a new file that has no credential", async () => {
     const fixture = await setupRepo();
     try {
@@ -244,8 +333,18 @@ describe("credential publish", { concurrency: 1 }, () => {
   });
 });
 
-async function assertRefused(bytes, pattern, secrets) {
+async function assertRefused(bytes, pattern, secrets, extraBaseline) {
   const fixture = await setupRepo();
+  if (extraBaseline) {
+    const snap = snapshotAgentTree(fixture.agent);
+    if (!snap.ok) throw new Error(snap.reason);
+    rememberAgentBaseline(CARD_ID, {
+      inodes: snap.inodes,
+      spawnTime: 0,
+      authBytes: AUTH,
+      ...extraBaseline,
+    });
+  }
   const calls = [];
   const stop = observeProcesses((event) => calls.push(event));
   try {

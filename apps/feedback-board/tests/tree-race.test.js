@@ -604,6 +604,9 @@ while True:
         { home: sandbox.home, tmp: sandbox.tmp },
       );
       assert.equal(Object.hasOwn(stripped, "XAI_API_KEY"), false);
+      assert.equal(stripped.PATH, "/usr/bin");
+      assert.equal(Object.hasOwn(stripped, "TMP"), false);
+      assert.equal(Object.hasOwn(stripped, "GH_CONFIG_DIR"), false);
       removeAgentTree(sandbox.root);
     } finally {
       fs.rmSync(real, { recursive: true, force: true });

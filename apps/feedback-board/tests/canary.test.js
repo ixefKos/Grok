@@ -80,7 +80,12 @@ const sensitive = Object.keys(process.env).filter((key) =>
   key === "GITHUB_TOKEN" ||
   key.startsWith("GH_") ||
   key === "GIT_ASKPASS" ||
-  key === "SSH_AUTH_SOCK"
+  key === "SSH_AUTH_SOCK" ||
+  key === "XAI_API_KEY" ||
+  key === "AWS_SECRET_ACCESS_KEY" ||
+  key === "NPM_TOKEN" ||
+  key === "ANTHROPIC_API_KEY" ||
+  key === "OPENAI_API_KEY"
 );
 let pgid = null;
 try {
@@ -88,9 +93,10 @@ try {
 } catch {
   pgid = null;
 }
-fs.writeFileSync(process.env.CANARY_REPORT, JSON.stringify({
+fs.writeFileSync(${JSON.stringify(reportPath)}, JSON.stringify({
   argv,
   sensitive,
+  keys: Object.keys(process.env).sort(),
   ghConfigDir: process.env.GH_CONFIG_DIR || "",
   gitTerminalPrompt: process.env.GIT_TERMINAL_PROMPT || "",
   pid: process.pid,
@@ -103,8 +109,8 @@ for (const command of ["git push", "gh pr merge"]) {
 if (lines.every((line) => line.startsWith("denied:"))) {
   lines.push("pushed: no");
 } else {
-  execFileSync("git", ["push", process.env.CANARY_BARE, "HEAD:refs/heads/canary-pushed"], {
-    cwd: process.env.CANARY_REPO,
+  execFileSync("git", ["push", ${JSON.stringify(bare)}, "HEAD:refs/heads/canary-pushed"], {
+    cwd: ${JSON.stringify(repo)},
   });
   lines.push("pushed: yes");
 }
@@ -120,9 +126,11 @@ for (const line of lines) console.log(line);
       GH_ENTERPRISE_TOKEN: "poison-enterprise",
       GIT_ASKPASS: "poison-askpass",
       SSH_AUTH_SOCK: "/tmp/poison-ssh-sock",
-      CANARY_REPORT: reportPath,
-      CANARY_BARE: bare,
-      CANARY_REPO: repo,
+      AWS_SECRET_ACCESS_KEY: "aws-dropped-" + "value-0001",
+      NPM_TOKEN: "npm-dropped-" + "value-0002",
+      ANTHROPIC_API_KEY: "ant-dropped-" + "value-0003",
+      OPENAI_API_KEY: "oai-dropped-" + "value-0004",
+      XAI_API_KEY: "present",
     });
     const child = spawnGrok({ command: mockPath, prompt, worktreePath: repo, env });
     let stdout = "";
@@ -179,15 +187,19 @@ for (const line of lines) console.log(line);
     assert.match(report.argv[1].slice(startAt, endAt), /git push/);
     assert.match(report.argv[1].slice(startAt, endAt), /gh pr merge/);
 
-    assert.deepEqual(report.sensitive, ["GH_CONFIG_DIR"]);
-    assert.equal(report.gitTerminalPrompt, "0");
-    assert.equal(fs.existsSync(report.ghConfigDir), true);
-    assert.deepEqual(fs.readdirSync(report.ghConfigDir), []);
+    assert.deepEqual(report.sensitive, []);
+    assert.equal(report.gitTerminalPrompt, "");
+    assert.equal(report.ghConfigDir, "");
+    const allowed = new Set(["PATH", "LANG", "TERM", "TZ", "USER", "SHELL", "HOME", "TMPDIR", "GROK_HOME"]);
+    for (const key of report.keys) {
+      assert.equal(allowed.has(key) || key.startsWith("LC_"), true, key);
+    }
     assert.equal(report.pgid, report.pid);
     assert.equal(prompt.includes(card.title), true);
     assert.notEqual(env.HOME, process.env.HOME);
     assert.equal(env.GROK_HOME, `${env.HOME}/.grok`);
-    assert.equal(env.TMPDIR, env.TMP);
+    assert.equal(Object.hasOwn(env, "TMP"), false);
+    assert.equal(Object.hasOwn(env, "GH_CONFIG_DIR"), false);
     assert.equal(env.TMPDIR.startsWith(os.tmpdir()), true);
   });
 
@@ -209,12 +221,12 @@ for (const line of lines) console.log(line);
 import fs from "node:fs";
 import { spawn } from "node:child_process";
 const grand = spawn("sleep", ["30"], { stdio: "ignore" });
-fs.writeFileSync(process.env.CANARY_PIDS, process.pid + "\\n" + grand.pid + "\\n");
+fs.writeFileSync(${JSON.stringify(pidPath)}, process.pid + "\\n" + grand.pid + "\\n");
 setInterval(() => {}, 1000);
 `,
     );
     fs.chmodSync(script, 0o755);
-    const env = scrubAgentEnv({ ...process.env, CANARY_PIDS: pidPath });
+    const env = scrubAgentEnv(process.env);
     const child = spawnGrok({
       command: script,
       prompt: "hold",
@@ -247,6 +259,10 @@ setInterval(() => {}, 1000);
       killProcessGroup(child, "SIGTERM");
       await exited;
       assert.equal(alive(leader), false);
+      const deadline = Date.now() + 1000;
+      while (alive(grand) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
       assert.equal(alive(grand), false);
     } finally {
       killProcessGroup(child, "SIGKILL");

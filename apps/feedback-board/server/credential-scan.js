@@ -3,7 +3,7 @@ export const CREDENTIAL_RUN_STATUS = "credential_refused";
 const MIN_SECRET = 20;
 const SECRET_KEY = /token|key|secret|password|credential/i;
 const TOKEN_PATTERN =
-  /(?<![A-Za-z0-9_-])(?:xai-[A-Za-z0-9]{20,}|gh[pos]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})/;
+  /(?<![A-Za-z0-9])(?:xai-[A-Za-z0-9]{20,}|gh[pos]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|AKIA[0-9A-Z]{16})|(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}/;
 const PRIVATE_KEY = /-----BEGIN (?:[A-Z0-9]+ ){0,3}PRIVATE KEY(?: BLOCK)?-----/;
 
 const TOKEN_NAMES = [
@@ -48,19 +48,20 @@ function rememberSecret(needles, seen, value) {
   for (const form of base64Forms(token)) addNeedle(needles, seen, form);
 }
 
-function collectSecrets(value, keyName, needles, seen, depth) {
+function collectSecrets(value, keyName, needles, seen, depth, inherited) {
   if (depth > 20) return;
+  const secretHere = Boolean(inherited) || isSecretKey(keyName);
   if (typeof value === "string") {
-    if (isSecretKey(keyName) && value.length >= MIN_SECRET) rememberSecret(needles, seen, value);
+    if (secretHere && value.length >= MIN_SECRET) rememberSecret(needles, seen, value);
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) collectSecrets(item, keyName, needles, seen, depth + 1);
+    for (const item of value) collectSecrets(item, keyName, needles, seen, depth + 1, secretHere);
     return;
   }
   if (value && typeof value === "object") {
     for (const [childKey, child] of Object.entries(value)) {
-      collectSecrets(child, childKey, needles, seen, depth + 1);
+      collectSecrets(child, childKey, needles, seen, depth + 1, secretHere);
     }
   }
 }
@@ -77,7 +78,7 @@ export function authNeedles(authBytes) {
   const text = raw.toString("utf8");
   if (!Buffer.from(text, "utf8").equals(raw)) return needles;
   try {
-    collectSecrets(JSON.parse(text), "", needles, seen, 0);
+    collectSecrets(JSON.parse(text), "", needles, seen, 0, false);
   } catch {
     // Auth that is not JSON contributes no substring needles.
   }
@@ -110,8 +111,12 @@ function classify(bytes, needles) {
   return null;
 }
 
-export function scanPublishChanges(changes, authBytes) {
+export function scanPublishChanges(changes, authBytes, envSecrets) {
   const needles = authNeedles(authBytes);
+  const seen = new Set(needles.map((needle) => needle.toString("latin1")));
+  for (const value of envSecrets || []) {
+    if (typeof value === "string") rememberSecret(needles, seen, value);
+  }
   const hits = [];
   const list = changes || [];
   for (let index = 0; index < list.length; index += 1) {
