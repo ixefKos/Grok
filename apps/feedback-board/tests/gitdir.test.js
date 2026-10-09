@@ -123,6 +123,14 @@ describe("pinned worktree git dir", () => {
     assert.equal(plan.env.GIT_WORK_TREE, path.resolve(worktree));
     assert.equal(plan.env.GIT_CONFIG_GLOBAL, "/dev/null");
     assert.equal(plan.env.GIT_CONFIG_NOSYSTEM, "1");
+    const bare = postRunGitPlan({
+      worktreePath: worktree,
+      gitDir,
+      args: ["status", "--porcelain"],
+      env: {},
+    });
+    assert.equal(bare.env.GIT_CONFIG_GLOBAL, "/dev/null");
+    assert.equal(bare.env.GIT_CONFIG_NOSYSTEM, "1");
     for (const flag of [
       "core.fsmonitor=false",
       "http.sslVerify=true",

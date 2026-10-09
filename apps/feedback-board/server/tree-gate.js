@@ -1,108 +1,83 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { runProcess } from "./exec.js";
 import { ALLOWED_PREFIXES } from "./guard.js";
 
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_TREE_FILES = 200;
 
-const META_NAMES = new Set([".gitattributes", ".gitmodules"]);
+const WALK_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "tree_walk.py");
 
 export function isAllowedRel(rel) {
   const name = String(rel || "").replace(/\\/g, "/");
   return ALLOWED_PREFIXES.some((prefix) => name.startsWith(prefix));
 }
 
-function fail(state, rel, reason) {
-  if (!state.reason) state.reason = reason;
-  if (rel) state.blocked.push(rel);
+function emptyWalk(reason) {
+  return { ok: false, reason, blocked: [], agentFiles: [], allowed: new Map() };
+}
+
+export function decodeTreeWalk(buffer) {
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(buffer || "").toString("utf8"));
+  } catch {
+    return emptyWalk("Could not read the agent tree.");
+  }
+  if (!payload || payload.ok !== true) {
+    return {
+      ok: false,
+      reason: payload && payload.reason ? payload.reason : "Could not read the agent tree.",
+      blocked: payload && Array.isArray(payload.blocked) ? payload.blocked : [],
+      agentFiles: [],
+      allowed: new Map(),
+    };
+  }
+  const allowed = new Map();
+  const agentFiles = [];
+  for (const file of payload.files || []) {
+    if (!file || typeof file.rel !== "string" || typeof file.bytes !== "string") {
+      return emptyWalk("Could not read the agent tree.");
+    }
+    if (!isAllowedRel(file.rel)) return emptyWalk("Could not read the agent tree.");
+    const bytes = Buffer.from(file.bytes, "base64");
+    if (bytes.length > MAX_FILE_BYTES) return emptyWalk("Agent tree contains a file over the size cap.");
+    allowed.set(file.rel, bytes);
+    agentFiles.push(file.rel);
+  }
+  for (const rel of payload.outside || []) {
+    if (typeof rel !== "string" || isAllowedRel(rel)) return emptyWalk("Could not read the agent tree.");
+    agentFiles.push(rel);
+  }
+  if (allowed.size > MAX_TREE_FILES) {
+    return emptyWalk("Agent tree contains more than 200 files in the allowed folders.");
+  }
+  return { ok: true, reason: null, blocked: [], agentFiles, allowed };
 }
 
 export function inspectAgentTree(root) {
-  const state = {
-    reason: null,
-    blocked: [],
-    agentFiles: [],
-    allowed: new Map(),
-  };
+  const result = spawnSync("python3", [WALK_SCRIPT, root], {
+    cwd: path.dirname(WALK_SCRIPT),
+    timeout: 20000,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.error || result.signal || result.status !== 0) return emptyWalk("Could not read the agent tree.");
+  return decodeTreeWalk(result.stdout);
+}
 
-  function walk(dir, relDir) {
-    let entries;
-    try {
-      const self = fs.lstatSync(dir);
-      if (self.isSymbolicLink() || !self.isDirectory()) {
-        fail(state, relDir || ".", "Agent tree contains a path that is not a directory.");
-        return;
-      }
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      fail(state, relDir || ".", "Could not read the agent tree.");
-      return;
-    }
-    for (const entry of entries) {
-      const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
-      const full = path.join(dir, entry.name);
-      let st;
-      try {
-        st = fs.lstatSync(full);
-      } catch {
-        fail(state, rel, "Could not read the agent tree.");
-        continue;
-      }
-      const parts = rel.split("/");
-      if (entry.name === ".git" || parts.includes(".git")) {
-        if (rel === ".git" && st.isFile() && !st.isSymbolicLink()) continue;
-        fail(state, rel, "Agent tree contains a .git file or directory.");
-        continue;
-      }
-      if (META_NAMES.has(entry.name)) {
-        fail(state, rel, "Agent tree contains .gitattributes or .gitmodules.");
-        continue;
-      }
-      if (st.isSymbolicLink()) {
-        fail(state, rel, "Agent tree contains a symlink.");
-        continue;
-      }
-      if (st.isSocket() || st.isFIFO() || st.isCharacterDevice() || st.isBlockDevice()) {
-        fail(state, rel, "Agent tree contains a socket, fifo, or device.");
-        continue;
-      }
-      if (st.isDirectory()) {
-        walk(full, rel);
-        continue;
-      }
-      if (!st.isFile()) {
-        fail(state, rel, "Agent tree contains a file that is not a regular file.");
-        continue;
-      }
-      state.agentFiles.push(rel);
-      if (!isAllowedRel(rel)) continue;
-      if (st.size > MAX_FILE_BYTES) {
-        fail(state, rel, "Agent tree contains a file over the size cap.");
-        continue;
-      }
-      if (state.allowed.size >= MAX_TREE_FILES) {
-        fail(state, rel, "Agent tree contains more than 200 files in the allowed folders.");
-        continue;
-      }
-      try {
-        state.allowed.set(rel, fs.readFileSync(full));
-      } catch {
-        fail(state, rel, "Could not read the agent tree.");
-      }
-    }
+export async function readAgentTree(root) {
+  try {
+    const result = await runProcess("python3", [WALK_SCRIPT, root], {
+      timeoutMs: 20000,
+      cwd: path.dirname(WALK_SCRIPT),
+    });
+    if (result.signal || result.code !== 0) return emptyWalk("Could not read the agent tree.");
+    return decodeTreeWalk(result.stdoutBuffer);
+  } catch {
+    return emptyWalk("Could not read the agent tree.");
   }
-
-  walk(root, "");
-  if (state.reason) {
-    return {
-      ok: false,
-      reason: state.reason,
-      blocked: state.blocked,
-      agentFiles: state.agentFiles,
-      allowed: state.allowed,
-    };
-  }
-  return { ok: true, reason: null, blocked: [], agentFiles: state.agentFiles, allowed: state.allowed };
 }
 
 export function outsideDrift(agentFiles, baseFiles) {
@@ -161,19 +136,82 @@ export function judgeAgentTree({ agentWorktree, basePaths, baseBlobs }) {
   return planned;
 }
 
+function unsafeRel(rel) {
+  if (typeof rel !== "string" || !rel) return true;
+  for (let index = 0; index < rel.length; index += 1) {
+    const code = rel.charCodeAt(index);
+    if (rel[index] === "\\" || code < 32 || code === 127) return true;
+  }
+  return false;
+}
+
+function lstatOrNull(file) {
+  try {
+    return fs.lstatSync(file);
+  } catch (error) {
+    if (error && error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function assertRealDirectory(file) {
+  const st = fs.lstatSync(file);
+  if (st.isSymbolicLink() || !st.isDirectory()) {
+    throw new Error("Refusing to follow a symlink in the fresh worktree.");
+  }
+}
+
+function mkdirNoFollow(root, relDir) {
+  let cursor = root;
+  for (const part of relDir.split("/")) {
+    if (!part || part === ".") continue;
+    cursor = path.join(cursor, part);
+    const existing = lstatOrNull(cursor);
+    if (!existing) {
+      fs.mkdirSync(cursor);
+    }
+    assertRealDirectory(cursor);
+  }
+}
+
 export function applyTreeChanges(freshRoot, changes) {
   const root = path.resolve(freshRoot);
+  assertRealDirectory(root);
   for (const change of changes || []) {
+    if (unsafeRel(change.path)) throw new Error("Refusing to write an unsafe path.");
     const dest = path.resolve(root, change.path);
-    if (dest !== root && !dest.startsWith(`${root}${path.sep}`)) {
+    const rel = path.relative(root, dest);
+    if (!rel || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
       throw new Error("Refusing to write outside the fresh worktree.");
     }
+    const posix = rel.split(path.sep).join("/");
+    if (!isAllowedRel(posix)) throw new Error("Refusing to write outside the allowed folders.");
+    const parentRel = posix.includes("/") ? posix.slice(0, posix.lastIndexOf("/")) : "";
+    if (parentRel) mkdirNoFollow(root, parentRel);
     if (change.kind === "delete") {
-      fs.rmSync(dest, { force: true });
+      const st = lstatOrNull(dest);
+      if (!st) continue;
+      if (st.isSymbolicLink()) {
+        fs.unlinkSync(dest);
+        continue;
+      }
+      fs.rmSync(dest, { recursive: true, force: true });
       continue;
     }
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, change.bytes);
+    const existing = lstatOrNull(dest);
+    if (existing && existing.isSymbolicLink()) {
+      throw new Error("Refusing to follow a symlink in the fresh worktree.");
+    }
+    const flags = fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW | fs.constants.O_CLOEXEC;
+    const fd = existing
+      ? fs.openSync(dest, flags | fs.constants.O_TRUNC)
+      : fs.openSync(dest, flags | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o644);
+    try {
+      const bytes = Buffer.isBuffer(change.bytes) ? change.bytes : Buffer.from(change.bytes || "");
+      fs.writeSync(fd, bytes);
+    } finally {
+      fs.closeSync(fd);
+    }
   }
 }
 

@@ -8,6 +8,7 @@ import {
   killProcessGroup,
   pullRequestText,
   pushArgs,
+  reapAgentGroup,
   scrubAgentEnv,
   spawnGrok,
 } from "./agent-launch.js";
@@ -35,13 +36,14 @@ import {
   symlinkPathsFromRaw,
   symlinkPathsOnDisk,
 } from "./guard.js";
+import { agentTreeUsers } from "./tree-idle.js";
 import {
   applyTreeChanges,
   freshWorktreePath,
-  inspectAgentTree,
   isAllowedRel,
   outsideDrift,
   planTreeChanges,
+  readAgentTree,
 } from "./tree-gate.js";
 import { buildAgentPrompt } from "./prompt.js";
 import { mutateState, readState } from "./store.js";
@@ -389,6 +391,7 @@ async function prepareAndSpawn(cardId) {
     prompt,
     worktreePath,
     env: scrubAgentEnv(process.env),
+    contain: true,
   });
   const stopFlag = { stopped: false };
   let accepted = false;
@@ -403,21 +406,47 @@ async function prepareAndSpawn(cardId) {
       if (runningCardId === cardId) runningCardId = null;
     };
     if (stopFlag.stopped) {
-      release();
-      void markCard(cardId, { runStatus: "stopped", message: "Run stopped." });
+      void (async () => {
+        try {
+          await reapAgentGroup(child.pid);
+        } finally {
+          release();
+          await markCard(cardId, { runStatus: "stopped", message: "Run stopped." });
+        }
+      })();
       return;
     }
-    if (code !== 0) {
-      release();
-      void markCard(cardId, {
-        runStatus: "error",
-        message: `The run exited with code ${code ?? "null"}${signal ? ` (${signal})` : ""}.`,
-      });
-      return;
-    }
-    void finishRun(cardId, worktreePath, config.workCopyPath, branch, baseSha)
-      .catch((error) => markCard(cardId, { runStatus: "error", message: clip(error.message) }))
-      .finally(release);
+    void (async () => {
+      try {
+        const reaped = await reapAgentGroup(child.pid);
+        if (!reaped.ok) {
+          await markCard(cardId, { runStatus: "error", message: reaped.reason });
+          return;
+        }
+        if (code !== 0) {
+          await markCard(cardId, {
+            runStatus: "error",
+            message: `The run exited with code ${code ?? "null"}${signal ? ` (${signal})` : ""}.`,
+          });
+          return;
+        }
+        const busy = agentTreeUsers(worktreePath);
+        if (!busy.ok) {
+          await markCard(cardId, {
+            column: "in_progress",
+            runStatus: "out_of_scope",
+            outOfScopePaths: busy.blocked || [],
+            message: busy.reason,
+          });
+          return;
+        }
+        await finishRun(cardId, worktreePath, config.workCopyPath, branch, baseSha);
+      } catch (error) {
+        await markCard(cardId, { runStatus: "error", message: clip(error.message) });
+      } finally {
+        release();
+      }
+    })();
   };
   child.stdout?.on("data", (chunk) => appendLog(cardId, chunk.toString()));
   child.stderr?.on("data", (chunk) => appendLog(cardId, chunk.toString()));
@@ -662,7 +691,11 @@ export async function publishAgentTree({
     if (pathIsTempOrGrok(workCopy) || pathIsTempOrGrok(agentWorktree)) {
       return refuse("Work copy path is under a temporary or Grok directory.");
     }
-    const inspected = inspectAgentTree(agentWorktree);
+    const busy = agentTreeUsers(agentWorktree);
+    if (!busy.ok) return refuse(busy.reason, busy.blocked);
+    const inspected = await readAgentTree(agentWorktree);
+    const busyAfter = agentTreeUsers(agentWorktree);
+    if (!busyAfter.ok) return refuse(busyAfter.reason, busyAfter.blocked);
     if (!inspected.ok) return refuse(inspected.reason, inspected.blocked);
 
     const base = await readBaseSnapshot(cardId, workCopy, baseSha, stateRoot);
@@ -842,7 +875,7 @@ async function finishRunPinned(cardId, pin, branch, baseSha, workCopy, options =
       {
         cwd: worktreePath,
         timeoutMs: 60000,
-        env: { GIT_DIR: ghPlan.env.GIT_DIR, GIT_WORK_TREE: ghPlan.env.GIT_WORK_TREE },
+        env: boardGitEnv({ GIT_DIR: ghPlan.env.GIT_DIR, GIT_WORK_TREE: ghPlan.env.GIT_WORK_TREE }),
         logRoot: stateRoot,
       },
     ),

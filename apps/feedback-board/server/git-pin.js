@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { boardGitEnv } from "./agent-launch.js";
 
 export const BOARD_GIT_CONFIG_ARGS = [
   "-c",
@@ -59,7 +60,7 @@ export function postRunGitPlan({ worktreePath, gitDir, args, env = {} } = {}) {
     reason: null,
     args: withBoardGitArgs(args),
     env: {
-      ...env,
+      ...boardGitEnv(env),
       GIT_DIR: gitDir,
       GIT_WORK_TREE: path.resolve(worktreePath),
     },

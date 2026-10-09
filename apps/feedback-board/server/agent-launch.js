@@ -63,8 +63,31 @@ export function scrubAgentEnv(source = process.env) {
   return env;
 }
 
-export function spawnGrok({ command, prompt, worktreePath, env }) {
-  return spawn(command, buildGrokArgs(prompt, worktreePath), {
+export function agentSpawnPlan(command, args, platform = process.platform) {
+  if (platform === "linux") {
+    return {
+      command: "unshare",
+      args: [
+        "--user",
+        "--map-root-user",
+        "--pid",
+        "--fork",
+        "--kill-child",
+        "--mount-proc",
+        "--",
+        command,
+        ...args,
+      ],
+      contained: true,
+    };
+  }
+  return { command, args, contained: false };
+}
+
+export function spawnGrok({ command, prompt, worktreePath, env, contain = false }) {
+  const grokArgs = buildGrokArgs(prompt, worktreePath);
+  const plan = contain ? agentSpawnPlan(command, grokArgs) : { command, args: grokArgs };
+  return spawn(plan.command, plan.args, {
     cwd: worktreePath,
     shell: false,
     env,
@@ -88,6 +111,39 @@ export function killProcessGroup(child, signal) {
       // The process is already gone.
     }
   }
+}
+
+export function groupAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error && error.code === "ESRCH") return false;
+    return true;
+  }
+}
+
+export async function reapAgentGroup(pid, waitMs = 3000) {
+  if (!Number.isInteger(pid) || pid <= 0) return { ok: true };
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    if (!error || error.code !== "ESRCH") {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone, or not our process.
+      }
+    }
+  }
+  const started = Date.now();
+  while (Date.now() - started < waitMs) {
+    if (!groupAlive(pid)) return { ok: true };
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!groupAlive(pid)) return { ok: true };
+  return { ok: false, reason: "Agent processes are still running." };
 }
 
 function globToRegExp(pattern) {

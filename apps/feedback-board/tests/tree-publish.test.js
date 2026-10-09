@@ -134,7 +134,8 @@ describe("agent tree publish", { concurrency: 1 }, () => {
         stateRoot: fixture.stateRoot,
       });
       assert.equal(outcome.rejected, true);
-      assert.match(outcome.reason, /\.git|gitattributes/);
+      assert.match(outcome.reason, /\.git/);
+      assert.doesNotMatch(outcome.reason, /gitattributes/);
       assert.equal(fs.existsSync(canary), false);
       const state = await readState(fixture.stateRoot);
       assert.equal(state.cards[0].runStatus, "out_of_scope");
