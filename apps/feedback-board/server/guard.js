@@ -84,7 +84,7 @@ function remoteLines(text) {
     .filter(Boolean);
 }
 
-export const LOCAL_CONFIG_PATTERN = "^(url|include|includeIf)\\.";
+export const LOCAL_CONFIG_PATTERN = "^(url|include|include[iI][fF])\\.";
 
 export function evaluateRemoteGuard({ fetchUrls, pushUrls } = {}) {
   const fetchList = remoteLines(fetchUrls);
@@ -111,11 +111,13 @@ function worktreeScopeUnavailable(result) {
 
 export function assessLocalConfig(results) {
   for (const result of results || []) {
-    if (localConfigHit(result && result.stdout)) {
+    if (!result || result.signal || !Number.isInteger(result.code)) {
+      return { ok: false, reason: "Could not read git url config." };
+    }
+    if (localConfigHit(result.stdout)) {
       return { ok: false, reason: "Work copy has a local url.* or include.* git config key." };
     }
-    const code = result && Number.isInteger(result.code) ? result.code : 1;
-    if (code === 0 || code === 1) continue;
+    if (result.code === 0 || result.code === 1) continue;
     if (worktreeScopeUnavailable(result)) continue;
     return { ok: false, reason: "Could not read git url config." };
   }

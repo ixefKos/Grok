@@ -41,6 +41,17 @@ async function gitResult(cwd, args, env = gitEnv) {
   }
 }
 
+describe("local config pattern", () => {
+  it("matches includeif in either case", () => {
+    const matcher = new RegExp(LOCAL_CONFIG_PATTERN);
+    assert.match("includeif.gitdir:/tmp/x.path /tmp/x", matcher);
+    assert.match("includeIf.gitdir:/tmp/x.path /tmp/x", matcher);
+    assert.match("includeIF.gitdir:/tmp/x.path /tmp/x", matcher);
+    assert.match("url.https://evil.example/.insteadof https://github.com/", matcher);
+    assert.equal(matcher.test("user.name Ada"), false);
+  });
+});
+
 describe("remote guard", () => {
   it("accepts fetch and push URLs that are all ixefKos/Grok", () => {
     assert.deepEqual(
@@ -160,6 +171,10 @@ describe("remote guard", () => {
     assert.match(unavailable.stderr, /multiple working trees/);
     assert.deepEqual(assessLocalConfig([unavailable]), { ok: true });
     assert.equal(assessLocalConfig([{ code: 128, stdout: "", stderr: "fatal: other" }]).ok, false);
+    assert.equal(assessLocalConfig([{ code: null, signal: "SIGKILL", stdout: "" }]).ok, false);
+    assert.equal(assessLocalConfig([{ code: null, signal: null, stdout: "" }]).ok, false);
+    assert.equal(assessLocalConfig([{ code: 1, signal: "SIGTERM", stdout: "" }]).ok, false);
+    assert.match(assessLocalConfig([{ code: null, signal: "SIGKILL", stdout: "" }]).reason, /Could not read git url config/);
 
     await execFileAsync("git", ["config", "extensions.worktreeConfig", "true"], { cwd, env });
     await execFileAsync(
@@ -259,12 +274,16 @@ describe("run wiring", () => {
     assert.equal(source.includes('["config", "--get-regexp"'), false);
     assert.match(
       source,
-      /gitOk\(cardId, pushArgs\(finalSha, branch\), worktreePath, 120000, "git push failed\.", boardGitEnv\(\)\)/,
+      /pinnedOk\(cardId, pushArgs\(finalSha, branch\), pin, 120000, "git push failed\.", boardGitEnv\(\)\)/,
     );
     assert.match(source, /commitArgs\(text\.message, identity\)/);
+    assert.match(source, /postRunGitPlan\(/);
+    const pinned = source.slice(source.indexOf("async function pinnedGit"));
+    assert.ok(pinned.indexOf("postRunGitPlan(") < pinned.indexOf('logged(cardId, "git"'));
     const spawnFail = source.indexOf("if (!spawned)");
-    const rollback = source.indexOf("rollbackReservedRun(", spawnFail);
-    assert.ok(spawnFail > 0 && rollback > spawnFail);
+    const cleanup = source.indexOf("cleanupFailedWorktree(", spawnFail);
+    const rollback = source.indexOf("rollbackReservedRun(", cleanup);
+    assert.ok(spawnFail > 0 && cleanup > spawnFail && rollback > cleanup);
   });
 });
 

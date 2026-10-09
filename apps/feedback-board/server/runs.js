@@ -12,6 +12,14 @@ import {
   spawnGrok,
 } from "./agent-launch.js";
 import {
+  failedSpawnCleanupArgs,
+  findRegisteredGitDir,
+  porcelainListsWorktree,
+  postRunGitPlan,
+  runIfPinned,
+  withBoardGitArgs,
+} from "./git-pin.js";
+import {
   assertHeadOnBranch,
   assessLocalConfig,
   evaluateRemoteGuard,
@@ -75,6 +83,35 @@ async function logged(cardId, command, args, options = {}) {
   });
 }
 
+async function boardGit(cardId, args, options = {}) {
+  return logged(cardId, "git", withBoardGitArgs(args), options);
+}
+
+function gitdirRejection(reason) {
+  const error = new Error(reason || "Worktree gitdir was rewritten.");
+  error.gitdirRejected = true;
+  return error;
+}
+
+async function pinnedGit(cardId, args, pin, timeoutMs, env, redactOutput = false) {
+  const plan = postRunGitPlan({
+    worktreePath: pin.worktreePath,
+    gitDir: pin.gitDir,
+    args,
+    env,
+  });
+  const executed = await runIfPinned(plan, (gitArgs, gitEnv) =>
+    logged(cardId, "git", gitArgs, {
+      cwd: pin.worktreePath,
+      timeoutMs,
+      env: gitEnv,
+      redactOutput,
+    }),
+  );
+  if (!executed.ran) throw gitdirRejection(executed.reason);
+  return executed.result;
+}
+
 async function markCard(cardId, fields) {
   await mutateState((state) => {
     const card = state.cards.find((item) => item.id === cardId);
@@ -116,30 +153,24 @@ export async function startCardRun(cardId) {
   }
 }
 
-async function readConfigScope(cardId, cwd, scope) {
-  return logged(cardId, "git", ["config", scope, "--get-regexp", LOCAL_CONFIG_PATTERN], {
-    cwd,
-    timeoutMs: 15000,
-    redactOutput: true,
-  });
+async function readConfigScope(cardId, scope, cwd, pin) {
+  const args = ["config", scope, "--get-regexp", LOCAL_CONFIG_PATTERN];
+  if (pin) return pinnedGit(cardId, args, pin, 15000, undefined, true);
+  return boardGit(cardId, args, { cwd, timeoutMs: 15000, redactOutput: true });
 }
 
-async function readOriginGuard(cardId, cwd) {
-  const fetch = await logged(cardId, "git", ["remote", "get-url", "--all", "origin"], {
-    cwd,
-    timeoutMs: 15000,
-    redactOutput: true,
-  });
-  const push = await logged(cardId, "git", ["remote", "get-url", "--push", "--all", "origin"], {
-    cwd,
-    timeoutMs: 15000,
-    redactOutput: true,
-  });
+async function readOriginGuard(cardId, cwd, pin = null) {
+  const run = (args) => {
+    if (pin) return pinnedGit(cardId, args, pin, 15000, undefined, true);
+    return boardGit(cardId, args, { cwd, timeoutMs: 15000, redactOutput: true });
+  };
+  const fetch = await run(["remote", "get-url", "--all", "origin"]);
+  const push = await run(["remote", "get-url", "--push", "--all", "origin"]);
   if (fetch.code !== 0 || push.code !== 0) {
     return { ok: false, reason: "Could not read the work copy origin." };
   }
-  const local = await readConfigScope(cardId, cwd, "--local");
-  const worktree = await readConfigScope(cardId, cwd, "--worktree");
+  const local = await readConfigScope(cardId, "--local", cwd, pin);
+  const worktree = await readConfigScope(cardId, "--worktree", cwd, pin);
   const configGuard = assessLocalConfig([local, worktree]);
   if (!configGuard.ok) return configGuard;
   return evaluateRemoteGuard({
@@ -202,6 +233,30 @@ async function rollbackReservedRun(cardId, previous, today) {
   await mutateState((state) => rollbackReservation(state, cardId, previous, today));
 }
 
+async function cleanupFailedWorktree(cardId, workCopy, worktreePath, branch) {
+  const args = failedSpawnCleanupArgs(worktreePath, branch);
+  await boardGit(cardId, args.remove, { cwd: workCopy, timeoutMs: 120000 });
+  await boardGit(cardId, args.branch, { cwd: workCopy, timeoutMs: 15000 });
+}
+
+async function recordWorktreeGitDir(cardId, workCopy, worktreePath) {
+  const common = await boardGit(cardId, ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+    cwd: workCopy,
+    timeoutMs: 15000,
+  });
+  if (common.code !== 0) return { ok: false, reason: "Could not resolve the worktree git dir." };
+  const list = await boardGit(cardId, ["worktree", "list", "--porcelain"], {
+    cwd: workCopy,
+    timeoutMs: 15000,
+  });
+  if (list.code !== 0 || !porcelainListsWorktree(list.stdout, worktreePath)) {
+    return { ok: false, reason: "Could not resolve the worktree git dir." };
+  }
+  const gitDir = findRegisteredGitDir(common.stdout.trim(), worktreePath);
+  if (!gitDir) return { ok: false, reason: "Could not resolve the worktree git dir." };
+  return { ok: true, gitDir };
+}
+
 async function prepareAndSpawn(cardId) {
   const config = loadConfig();
   const state = await readState();
@@ -243,7 +298,7 @@ async function prepareAndSpawn(cardId) {
   }
 
   appendLog(cardId, `Run for card ${cardId}\nWork copy: ${config.workCopyPath}\n`);
-  const fetched = await logged(cardId, "git", ["fetch", "origin", "main"], {
+  const fetched = await boardGit(cardId, ["fetch", "origin", "main"], {
     cwd: config.workCopyPath,
     timeoutMs: 120000,
   });
@@ -251,7 +306,7 @@ async function prepareAndSpawn(cardId) {
     return { ok: false, status: 409, error: clip(fetched.stderr || "git fetch origin main failed.") };
   }
 
-  const base = await logged(cardId, "git", ["rev-parse", "origin/main"], {
+  const base = await boardGit(cardId, ["rev-parse", "origin/main"], {
     cwd: config.workCopyPath,
     timeoutMs: 15000,
   });
@@ -260,18 +315,26 @@ async function prepareAndSpawn(cardId) {
     return { ok: false, status: 409, error: "Could not pin origin/main." };
   }
 
-  const added = await logged(
-    cardId,
-    "git",
-    ["worktree", "add", "-b", branch, worktreePath, baseSha],
-    { cwd: config.workCopyPath, timeoutMs: 120000 },
-  );
+  const added = await boardGit(cardId, ["worktree", "add", "-b", branch, worktreePath, baseSha], {
+    cwd: config.workCopyPath,
+    timeoutMs: 120000,
+  });
   if (added.code !== 0) {
     return { ok: false, status: 409, error: clip(added.stderr || "git worktree add failed.") };
   }
 
+  const recorded = await recordWorktreeGitDir(cardId, config.workCopyPath, worktreePath);
+  if (!recorded.ok) {
+    await cleanupFailedWorktree(cardId, config.workCopyPath, worktreePath, branch);
+    return { ok: false, status: 409, error: recorded.reason };
+  }
+  const gitDir = recorded.gitDir;
+
   const reserved = await reserveRun(cardId, config);
-  if (!reserved.ok) return reserved;
+  if (!reserved.ok) {
+    await cleanupFailedWorktree(cardId, config.workCopyPath, worktreePath, branch);
+    return reserved;
+  }
 
   const prompt = buildAgentPrompt(card);
   appendLog(
@@ -309,7 +372,7 @@ async function prepareAndSpawn(cardId) {
       });
       return;
     }
-    void finishRun(cardId, worktreePath, branch, baseSha)
+    void finishRun(cardId, worktreePath, branch, baseSha, gitDir)
       .catch((error) => markCard(cardId, { runStatus: "error", message: clip(error.message) }))
       .finally(release);
   };
@@ -324,6 +387,7 @@ async function prepareAndSpawn(cardId) {
   });
   if (!spawned) {
     killProcessGroup(child, "SIGKILL");
+    await cleanupFailedWorktree(cardId, config.workCopyPath, worktreePath, branch);
     await rollbackReservedRun(cardId, reserved.previous, reserved.today || localDay());
     return { ok: false, status: 409, error: `Could not start ${config.grokCommand}.` };
   }
@@ -341,17 +405,13 @@ async function requireOk(cardId, result, fallback) {
   throw new Error(message);
 }
 
-async function gitOk(cardId, args, cwd, timeoutMs, fallback, env) {
-  return requireOk(cardId, await logged(cardId, "git", args, { cwd, timeoutMs, env }), fallback);
+async function pinnedOk(cardId, args, pin, timeoutMs, fallback, env) {
+  return requireOk(cardId, await pinnedGit(cardId, args, pin, timeoutMs, env), fallback);
 }
 
-async function localGitIdentity(cardId, cwd) {
+async function localGitIdentity(cardId, pin) {
   const read = async (key) => {
-    const result = await logged(cardId, "git", ["config", "--local", "--get", key], {
-      cwd,
-      timeoutMs: 15000,
-      redactOutput: true,
-    });
+    const result = await pinnedGit(cardId, ["config", "--local", "--get", key], pin, 15000, undefined, true);
     return result.code === 0 ? result.stdout : "";
   };
   return {
@@ -360,13 +420,13 @@ async function localGitIdentity(cardId, cwd) {
   };
 }
 
-async function collectSymlinks(cardId, cwd, baseSha, head, untrackedStdout) {
-  const ranged = await gitOk(cardId, gateRawArgs(baseSha, head), cwd, 20000, "git diff failed.");
-  const dirty = await gitOk(cardId, ["diff", "--raw", "--no-renames"], cwd, 20000, "git diff failed.");
-  const staged = await gitOk(
+async function collectSymlinks(cardId, pin, baseSha, head, untrackedStdout) {
+  const ranged = await pinnedOk(cardId, gateRawArgs(baseSha, head), pin, 20000, "git diff failed.");
+  const dirty = await pinnedOk(cardId, ["diff", "--raw", "--no-renames"], pin, 20000, "git diff failed.");
+  const staged = await pinnedOk(
     cardId,
     ["diff", "--raw", "--cached", "--no-renames"],
-    cwd,
+    pin,
     20000,
     "git diff failed.",
   );
@@ -374,35 +434,29 @@ async function collectSymlinks(cardId, cwd, baseSha, head, untrackedStdout) {
     ...symlinkPathsFromRaw(ranged.stdout),
     ...symlinkPathsFromRaw(dirty.stdout),
     ...symlinkPathsFromRaw(staged.stdout),
-    ...symlinkPathsOnDisk(cwd, listChangedPaths(untrackedStdout)),
+    ...symlinkPathsOnDisk(pin.worktreePath, listChangedPaths(untrackedStdout)),
   ];
 }
 
-async function changedPaths(cardId, cwd, baseSha, head) {
-  const diff = await gitOk(cardId, gateDiffArgs(baseSha, head), cwd, 20000, "git diff failed.");
-  const dirty = await gitOk(
-    cardId,
-    ["diff", "--name-only", "--no-renames"],
-    cwd,
-    20000,
-    "git diff failed.",
-  );
-  const staged = await gitOk(
+async function changedPaths(cardId, pin, baseSha, head) {
+  const diff = await pinnedOk(cardId, gateDiffArgs(baseSha, head), pin, 20000, "git diff failed.");
+  const dirty = await pinnedOk(cardId, ["diff", "--name-only", "--no-renames"], pin, 20000, "git diff failed.");
+  const staged = await pinnedOk(
     cardId,
     ["diff", "--name-only", "--cached", "--no-renames"],
-    cwd,
+    pin,
     20000,
     "git diff failed.",
   );
-  const untracked = await gitOk(
+  const untracked = await pinnedOk(
     cardId,
     ["ls-files", "--others", "--exclude-standard"],
-    cwd,
+    pin,
     20000,
     "Could not list untracked files.",
   );
   const paths = listChangedPaths(diff.stdout, dirty.stdout, staged.stdout, untracked.stdout);
-  const links = await collectSymlinks(cardId, cwd, baseSha, head, untracked.stdout);
+  const links = await collectSymlinks(cardId, pin, baseSha, head, untracked.stdout);
   return {
     paths,
     blocked: findOutOfScopePaths(paths, links),
@@ -424,19 +478,16 @@ async function markOutOfScope(cardId, paths, blocked) {
   });
 }
 
-async function requireCardHead(cardId, cwd, branch) {
-  const head = await gitOk(cardId, ["rev-parse", "HEAD"], cwd, 15000, "Could not read HEAD.");
-  const branchRef = await gitOk(
+async function requireCardHead(cardId, pin, branch) {
+  const head = await pinnedOk(cardId, ["rev-parse", "HEAD"], pin, 15000, "Could not read HEAD.");
+  const branchRef = await pinnedOk(
     cardId,
     ["rev-parse", `refs/heads/${branch}`],
-    cwd,
+    pin,
     15000,
     "Could not read the card branch.",
   );
-  const symbolic = await logged(cardId, "git", ["symbolic-ref", "--quiet", "HEAD"], {
-    cwd,
-    timeoutMs: 15000,
-  });
+  const symbolic = await pinnedGit(cardId, ["symbolic-ref", "--quiet", "HEAD"], pin, 15000);
   const verdict = assertHeadOnBranch({
     headSha: head.stdout.trim(),
     branchSha: branchRef.stdout.trim(),
@@ -447,45 +498,62 @@ async function requireCardHead(cardId, cwd, branch) {
   return head.stdout.trim();
 }
 
-async function finishRun(cardId, worktreePath, branch, baseSha) {
+async function markGitdirRejected(cardId, reason) {
+  appendLog(cardId, `${reason}\n`);
+  await markCard(cardId, {
+    column: "in_progress",
+    runStatus: "out_of_scope",
+    outOfScopePaths: [".git"],
+    message: reason,
+  });
+}
+
+async function finishRun(cardId, worktreePath, branch, baseSha, gitDir) {
+  const pin = { worktreePath, gitDir };
+  try {
+    await finishRunPinned(cardId, pin, branch, baseSha);
+  } catch (error) {
+    if (error && error.gitdirRejected) {
+      await markGitdirRejected(cardId, error.message);
+      return;
+    }
+    throw error;
+  }
+}
+
+async function finishRunPinned(cardId, pin, branch, baseSha) {
+  const { worktreePath } = pin;
   appendLog(cardId, "\nChecking changed files.\n");
-  await requireCardHead(cardId, worktreePath, branch);
-  const first = await changedPaths(cardId, worktreePath, baseSha, "HEAD");
+  await requireCardHead(cardId, pin, branch);
+  const first = await changedPaths(cardId, pin, baseSha, "HEAD");
   appendLog(cardId, `Changed paths:\n${first.paths.join("\n") || "(none)"}\n`);
   if (first.blocked.length) {
     await markOutOfScope(cardId, first.paths, first.blocked);
     return;
   }
 
-  const status = await gitOk(
+  const status = await pinnedOk(
     cardId,
     ["status", "--porcelain", "--", "apps/thedailylumen", "apps/feedback-board"],
-    worktreePath,
+    pin,
     20000,
     "git status failed.",
   );
   if (status.stdout.trim()) {
-    await gitOk(
+    await pinnedOk(
       cardId,
       ["add", "--", "apps/thedailylumen", "apps/feedback-board"],
-      worktreePath,
+      pin,
       20000,
       "git add failed.",
     );
-    const identity = await localGitIdentity(cardId, worktreePath);
+    const identity = await localGitIdentity(cardId, pin);
     const text = pullRequestText(cardId, first.paths);
-    await gitOk(
-      cardId,
-      commitArgs(text.message, identity),
-      worktreePath,
-      20000,
-      "git commit failed.",
-      boardGitEnv(),
-    );
+    await pinnedOk(cardId, commitArgs(text.message, identity), pin, 20000, "git commit failed.", boardGitEnv());
   }
 
-  const finalSha = await requireCardHead(cardId, worktreePath, branch);
-  const second = await changedPaths(cardId, worktreePath, baseSha, finalSha);
+  const finalSha = await requireCardHead(cardId, pin, branch);
+  const second = await changedPaths(cardId, pin, baseSha, finalSha);
   appendLog(cardId, `Re-gated ${baseSha}..${finalSha}\n${second.paths.join("\n") || "(none)"}\n`);
   if (second.blocked.length) {
     await markOutOfScope(cardId, second.paths, second.blocked);
@@ -502,16 +570,18 @@ async function finishRun(cardId, worktreePath, branch, baseSha) {
     return;
   }
 
-  const confirmed = await requireCardHead(cardId, worktreePath, branch);
+  const confirmed = await requireCardHead(cardId, pin, branch);
   if (confirmed.toLowerCase() !== finalSha.toLowerCase()) {
     throw new Error("HEAD moved after the gate.");
   }
-  const remoteGuard = await readOriginGuard(cardId, worktreePath);
+  const remoteGuard = await readOriginGuard(cardId, worktreePath, pin);
   if (!remoteGuard.ok) throw new Error(remoteGuard.reason);
 
-  await gitOk(cardId, pushArgs(finalSha, branch), worktreePath, 120000, "git push failed.", boardGitEnv());
+  await pinnedOk(cardId, pushArgs(finalSha, branch), pin, 120000, "git push failed.", boardGitEnv());
 
   const text = pullRequestText(cardId, second.committedPaths);
+  const ghPlan = postRunGitPlan({ worktreePath, gitDir: pin.gitDir, args: [], env: {} });
+  if (!ghPlan.ok) throw gitdirRejection(ghPlan.reason);
   const created = await requireOk(
     cardId,
     await logged(
@@ -532,7 +602,11 @@ async function finishRun(cardId, worktreePath, branch, baseSha) {
         "--body",
         text.body,
       ],
-      { cwd: worktreePath, timeoutMs: 60000 },
+      {
+        cwd: worktreePath,
+        timeoutMs: 60000,
+        env: { GIT_DIR: ghPlan.env.GIT_DIR, GIT_WORK_TREE: ghPlan.env.GIT_WORK_TREE },
+      },
     ),
     "gh pr create failed.",
   );
