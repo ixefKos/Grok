@@ -3,6 +3,7 @@ import path from "node:path";
 import { appRoot, loadConfig } from "./config.js";
 import { runProcess } from "./exec.js";
 import {
+  boardGitEnv,
   commitArgs,
   killProcessGroup,
   pullRequestText,
@@ -12,12 +13,17 @@ import {
 } from "./agent-launch.js";
 import {
   assertHeadOnBranch,
+  assessLocalConfig,
   evaluateRemoteGuard,
   evaluateStartGuards,
   findOutOfScopePaths,
   gateDiffArgs,
+  gateRawArgs,
   listChangedPaths,
+  LOCAL_CONFIG_PATTERN,
   pathContainsLumen,
+  symlinkPathsFromRaw,
+  symlinkPathsOnDisk,
 } from "./guard.js";
 import { buildAgentPrompt } from "./prompt.js";
 import { mutateState, readState } from "./store.js";
@@ -110,53 +116,90 @@ export async function startCardRun(cardId) {
   }
 }
 
-async function readOriginGuard(cardId, cwd) {
-  const fetch = await logged(cardId, "git", ["remote", "get-url", "--all", "origin"], {
-    cwd,
-    timeoutMs: 15000,
-  });
-  const push = await logged(cardId, "git", ["remote", "get-url", "--push", "--all", "origin"], {
-    cwd,
-    timeoutMs: 15000,
-  });
-  if (fetch.code !== 0 || push.code !== 0) {
-    return { ok: false, reason: "Could not read the work copy origin." };
-  }
-  const config = await logged(cardId, "git", ["config", "--get-regexp", "^url\\."], {
+async function readConfigScope(cardId, cwd, scope) {
+  return logged(cardId, "git", ["config", scope, "--get-regexp", LOCAL_CONFIG_PATTERN], {
     cwd,
     timeoutMs: 15000,
     redactOutput: true,
   });
-  if (config.code !== 0 && config.code !== 1) {
-    return { ok: false, reason: "Could not read git url config." };
+}
+
+async function readOriginGuard(cardId, cwd) {
+  const fetch = await logged(cardId, "git", ["remote", "get-url", "--all", "origin"], {
+    cwd,
+    timeoutMs: 15000,
+    redactOutput: true,
+  });
+  const push = await logged(cardId, "git", ["remote", "get-url", "--push", "--all", "origin"], {
+    cwd,
+    timeoutMs: 15000,
+    redactOutput: true,
+  });
+  if (fetch.code !== 0 || push.code !== 0) {
+    return { ok: false, reason: "Could not read the work copy origin." };
   }
+  const local = await readConfigScope(cardId, cwd, "--local");
+  const worktree = await readConfigScope(cardId, cwd, "--worktree");
+  const configGuard = assessLocalConfig([local, worktree]);
+  if (!configGuard.ok) return configGuard;
   return evaluateRemoteGuard({
     fetchUrls: fetch.stdout,
     pushUrls: push.stdout,
-    urlConfigText: config.stdout,
   });
 }
 
+export function applyReservation(state, cardId, { dailyCap, today }) {
+  const fresh = state.cards.find((item) => item.id === cardId);
+  if (!fresh) return { ok: false, status: 404, error: "Card not found." };
+  if (fresh.locked || fresh.runStatus === "running") {
+    return { ok: false, status: 409, error: "This card already started a run." };
+  }
+  const count = runsOnDay(state, today);
+  if (count >= dailyCap) {
+    return { ok: false, status: 409, error: `Daily run cap (${dailyCap}) is reached.` };
+  }
+  const previous = {
+    column: fresh.column,
+    locked: fresh.locked,
+    runStatus: fresh.runStatus,
+    message: fresh.message,
+    outOfScopePaths: fresh.outOfScopePaths,
+  };
+  state.usage = { date: today, count: count + 1 };
+  fresh.locked = true;
+  fresh.column = "in_progress";
+  fresh.runStatus = "running";
+  fresh.message = null;
+  fresh.outOfScopePaths = [];
+  fresh.updatedAt = new Date().toISOString();
+  return { ok: true, previous, today };
+}
+
+export function rollbackReservation(state, cardId, previous, today) {
+  const card = state.cards.find((item) => item.id === cardId);
+  if (!card) return { ok: false, error: "Card not found." };
+  const prior = previous || {};
+  card.locked = false;
+  if (Object.prototype.hasOwnProperty.call(prior, "column")) card.column = prior.column;
+  if (Object.prototype.hasOwnProperty.call(prior, "runStatus")) card.runStatus = prior.runStatus;
+  if (Object.prototype.hasOwnProperty.call(prior, "message")) card.message = prior.message;
+  if (Object.prototype.hasOwnProperty.call(prior, "outOfScopePaths")) {
+    card.outOfScopePaths = prior.outOfScopePaths;
+  }
+  card.updatedAt = new Date().toISOString();
+  if (state.usage && state.usage.date === today && state.usage.count > 0) {
+    state.usage.count -= 1;
+  }
+  return { ok: true };
+}
+
 async function reserveRun(cardId, config) {
-  return mutateState((current) => {
-    const fresh = current.cards.find((item) => item.id === cardId);
-    if (!fresh) return { ok: false, status: 404, error: "Card not found." };
-    if (fresh.locked || fresh.runStatus === "running") {
-      return { ok: false, status: 409, error: "This card already started a run." };
-    }
-    const today = localDay();
-    const count = runsOnDay(current, today);
-    if (count >= config.dailyCap) {
-      return { ok: false, status: 409, error: `Daily run cap (${config.dailyCap}) is reached.` };
-    }
-    current.usage = { date: today, count: count + 1 };
-    fresh.locked = true;
-    fresh.column = "in_progress";
-    fresh.runStatus = "running";
-    fresh.message = null;
-    fresh.outOfScopePaths = [];
-    fresh.updatedAt = new Date().toISOString();
-  });
+  const today = localDay();
+  return mutateState((current) => applyReservation(current, cardId, { dailyCap: config.dailyCap, today }));
+}
+
+async function rollbackReservedRun(cardId, previous, today) {
+  await mutateState((state) => rollbackReservation(state, cardId, previous, today));
 }
 
 async function prepareAndSpawn(cardId) {
@@ -281,10 +324,7 @@ async function prepareAndSpawn(cardId) {
   });
   if (!spawned) {
     killProcessGroup(child, "SIGKILL");
-    await markCard(cardId, {
-      runStatus: "error",
-      message: `Could not start ${config.grokCommand}.`,
-    });
+    await rollbackReservedRun(cardId, reserved.previous, reserved.today || localDay());
     return { ok: false, status: 409, error: `Could not start ${config.grokCommand}.` };
   }
 
@@ -301,8 +341,41 @@ async function requireOk(cardId, result, fallback) {
   throw new Error(message);
 }
 
-async function gitOk(cardId, args, cwd, timeoutMs, fallback) {
-  return requireOk(cardId, await logged(cardId, "git", args, { cwd, timeoutMs }), fallback);
+async function gitOk(cardId, args, cwd, timeoutMs, fallback, env) {
+  return requireOk(cardId, await logged(cardId, "git", args, { cwd, timeoutMs, env }), fallback);
+}
+
+async function localGitIdentity(cardId, cwd) {
+  const read = async (key) => {
+    const result = await logged(cardId, "git", ["config", "--local", "--get", key], {
+      cwd,
+      timeoutMs: 15000,
+      redactOutput: true,
+    });
+    return result.code === 0 ? result.stdout : "";
+  };
+  return {
+    name: await read("user.name"),
+    email: await read("user.email"),
+  };
+}
+
+async function collectSymlinks(cardId, cwd, baseSha, head, untrackedStdout) {
+  const ranged = await gitOk(cardId, gateRawArgs(baseSha, head), cwd, 20000, "git diff failed.");
+  const dirty = await gitOk(cardId, ["diff", "--raw", "--no-renames"], cwd, 20000, "git diff failed.");
+  const staged = await gitOk(
+    cardId,
+    ["diff", "--raw", "--cached", "--no-renames"],
+    cwd,
+    20000,
+    "git diff failed.",
+  );
+  return [
+    ...symlinkPathsFromRaw(ranged.stdout),
+    ...symlinkPathsFromRaw(dirty.stdout),
+    ...symlinkPathsFromRaw(staged.stdout),
+    ...symlinkPathsOnDisk(cwd, listChangedPaths(untrackedStdout)),
+  ];
 }
 
 async function changedPaths(cardId, cwd, baseSha, head) {
@@ -329,9 +402,10 @@ async function changedPaths(cardId, cwd, baseSha, head) {
     "Could not list untracked files.",
   );
   const paths = listChangedPaths(diff.stdout, dirty.stdout, staged.stdout, untracked.stdout);
+  const links = await collectSymlinks(cardId, cwd, baseSha, head, untracked.stdout);
   return {
     paths,
-    blocked: findOutOfScopePaths(paths),
+    blocked: findOutOfScopePaths(paths, links),
     committedPaths: listChangedPaths(diff.stdout),
     dirty: dirty.stdout.trim(),
     staged: staged.stdout.trim(),
@@ -398,8 +472,16 @@ async function finishRun(cardId, worktreePath, branch, baseSha) {
       20000,
       "git add failed.",
     );
+    const identity = await localGitIdentity(cardId, worktreePath);
     const text = pullRequestText(cardId, first.paths);
-    await gitOk(cardId, commitArgs(text.message), worktreePath, 20000, "git commit failed.");
+    await gitOk(
+      cardId,
+      commitArgs(text.message, identity),
+      worktreePath,
+      20000,
+      "git commit failed.",
+      boardGitEnv(),
+    );
   }
 
   const finalSha = await requireCardHead(cardId, worktreePath, branch);
@@ -427,7 +509,7 @@ async function finishRun(cardId, worktreePath, branch, baseSha) {
   const remoteGuard = await readOriginGuard(cardId, worktreePath);
   if (!remoteGuard.ok) throw new Error(remoteGuard.reason);
 
-  await gitOk(cardId, pushArgs(finalSha, branch), worktreePath, 120000, "git push failed.");
+  await gitOk(cardId, pushArgs(finalSha, branch), worktreePath, 120000, "git push failed.", boardGitEnv());
 
   const text = pullRequestText(cardId, second.committedPaths);
   const created = await requireOk(

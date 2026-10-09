@@ -45,4 +45,11 @@ describe("changed-files gate", () => {
   it("passes when nothing changed", () => {
     assert.deepEqual(findOutOfScopePaths(listChangedPaths("", "\n")), []);
   });
+
+  it("blocks a symlink path inside an allowed folder", () => {
+    assert.deepEqual(
+      findOutOfScopePaths(["apps/feedback-board/link"], ["apps/feedback-board/link"]),
+      ["apps/feedback-board/link"],
+    );
+  });
 });

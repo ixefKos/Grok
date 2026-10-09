@@ -5,7 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { describe, it } from "node:test";
-import { assertHeadOnBranch, findOutOfScopePaths, gateDiffArgs, listChangedPaths } from "../server/guard.js";
+import {
+  assertHeadOnBranch,
+  findOutOfScopePaths,
+  gateDiffArgs,
+  listChangedPaths,
+  symlinkPathsFromRaw,
+  symlinkPathsOnDisk,
+} from "../server/guard.js";
 
 const execFileAsync = promisify(execFile);
 const CARD_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
@@ -120,5 +127,25 @@ describe("changed-files gate bypasses", () => {
       symbolicHead: otherSymbolic,
     });
     assert.equal(other.ok, false);
+  });
+
+  it("rejects a git mode 120000 symlink in the changed set", async () => {
+    const cwd = await initRepo();
+    const folder = path.join(cwd, "apps", "feedback-board");
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, "ok.txt"), "ok\n");
+    fs.symlinkSync("ok.txt", path.join(folder, "link"));
+    await git(cwd, ["add", "--", "apps/feedback-board/ok.txt", "apps/feedback-board/link"]);
+    const raw = await git(cwd, ["diff", "--raw", "--cached", "--no-renames"]);
+    assert.match(raw, /120000/);
+    const links = symlinkPathsFromRaw(raw);
+    assert.deepEqual(links, ["apps/feedback-board/link"]);
+    assert.deepEqual(findOutOfScopePaths(["apps/feedback-board/ok.txt", "apps/feedback-board/link"], links), [
+      "apps/feedback-board/link",
+    ]);
+    fs.symlinkSync("ok.txt", path.join(folder, "loose"));
+    assert.deepEqual(symlinkPathsOnDisk(cwd, ["apps/feedback-board/loose", "apps/feedback-board/ok.txt"]), [
+      "apps/feedback-board/loose",
+    ]);
   });
 });

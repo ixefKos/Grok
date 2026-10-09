@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 export const ALLOWED_PREFIXES = ["apps/thedailylumen/", "apps/feedback-board/"];
@@ -83,7 +84,9 @@ function remoteLines(text) {
     .filter(Boolean);
 }
 
-export function evaluateRemoteGuard({ fetchUrls, pushUrls, urlConfigText } = {}) {
+export const LOCAL_CONFIG_PATTERN = "^(url|include|includeIf)\\.";
+
+export function evaluateRemoteGuard({ fetchUrls, pushUrls } = {}) {
   const fetchList = remoteLines(fetchUrls);
   const pushList = remoteLines(pushUrls);
   if (fetchList.length === 0 || pushList.length === 0) {
@@ -94,8 +97,27 @@ export function evaluateRemoteGuard({ fetchUrls, pushUrls, urlConfigText } = {})
       return { ok: false, reason: "Work copy origin is not ixefKos/Grok." };
     }
   }
-  if (remoteLines(urlConfigText).length > 0) {
-    return { ok: false, reason: "Work copy has a url.* git config key." };
+  return { ok: true };
+}
+
+export function localConfigHit(text) {
+  return remoteLines(text).length > 0;
+}
+
+function worktreeScopeUnavailable(result) {
+  const stderr = String((result && result.stderr) || "");
+  return result && result.code === 128 && stderr.includes("multiple working trees");
+}
+
+export function assessLocalConfig(results) {
+  for (const result of results || []) {
+    if (localConfigHit(result && result.stdout)) {
+      return { ok: false, reason: "Work copy has a local url.* or include.* git config key." };
+    }
+    const code = result && Number.isInteger(result.code) ? result.code : 1;
+    if (code === 0 || code === 1) continue;
+    if (worktreeScopeUnavailable(result)) continue;
+    return { ok: false, reason: "Could not read git url config." };
   }
   return { ok: true };
 }
@@ -106,6 +128,45 @@ export function gateDiffArgs(baseSha, head = "HEAD") {
   const range = `${String(baseSha)}..${head}`;
   if (range.includes("origin/main")) throw new Error("diff range must not use origin/main.");
   return ["diff", "--name-only", "--no-renames", range];
+}
+
+export function gateRawArgs(baseSha, head = "HEAD") {
+  const range = gateDiffArgs(baseSha, head).at(-1);
+  return ["diff", "--raw", "--no-renames", range];
+}
+
+export function symlinkPathsFromRaw(raw) {
+  const paths = [];
+  for (const line of String(raw ?? "").split(/\r?\n/)) {
+    if (!line.startsWith(":")) continue;
+    const tab = line.indexOf("\t");
+    if (tab < 0) continue;
+    const parts = line.slice(0, tab).split(" ");
+    const oldMode = parts[0].slice(1);
+    const newMode = parts[1];
+    if (oldMode !== "120000" && newMode !== "120000") continue;
+    let filePath = line.slice(tab + 1);
+    if (filePath.startsWith('"') && filePath.endsWith('"')) filePath = filePath.slice(1, -1);
+    if (filePath) paths.push(filePath);
+  }
+  return paths;
+}
+
+export function symlinkPathsOnDisk(cwd, paths) {
+  const root = path.resolve(cwd);
+  const links = [];
+  for (const rel of paths || []) {
+    const name = String(rel).trim();
+    if (!name) continue;
+    const full = path.resolve(root, name);
+    if (full !== root && !full.startsWith(`${root}${path.sep}`)) continue;
+    try {
+      if (fs.lstatSync(full).isSymbolicLink()) links.push(name);
+    } catch {
+      // A missing path is handled by the name gate.
+    }
+  }
+  return links;
 }
 
 export function assertHeadOnBranch({ headSha, branchSha, branch, symbolicHead } = {}) {
@@ -133,7 +194,7 @@ export function listChangedPaths(...outputs) {
   return paths;
 }
 
-export function findOutOfScopePaths(paths) {
+export function findOutOfScopePaths(paths, symlinks = []) {
   const blocked = [];
   const seen = new Set();
   for (const raw of paths || []) {
@@ -147,6 +208,12 @@ export function findOutOfScopePaths(paths) {
       seen.add(original);
       blocked.push(original);
     }
+  }
+  for (const raw of symlinks || []) {
+    const original = String(raw).trim();
+    if (!original || seen.has(original)) continue;
+    seen.add(original);
+    blocked.push(original);
   }
   return blocked;
 }

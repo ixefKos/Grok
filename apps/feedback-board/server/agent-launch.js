@@ -137,12 +137,51 @@ export function pullRequestText(cardId, files) {
   return { title, body, message: title };
 }
 
-export function commitArgs(message) {
-  return ["-c", "core.hooksPath=/dev/null", "commit", "-m", message];
+export const DEFAULT_GIT_NAME = "feedback-board";
+export const DEFAULT_GIT_EMAIL = "feedback-board@localhost";
+export const GH_CREDENTIAL_HELPER = "!gh auth git-credential";
+
+export function boardGitEnv(base = {}) {
+  return {
+    ...base,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+  };
+}
+
+export function publishConfigArgs() {
+  return [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "credential.helper=",
+    "-c",
+    `credential.https://github.com.helper=${GH_CREDENTIAL_HELPER}`,
+  ];
+}
+
+function identityValue(value, fallback) {
+  const text = String(value ?? "").replace(/\r?\n/g, "").trim();
+  return text || fallback;
+}
+
+export function commitArgs(message, identity = {}) {
+  const name = identityValue(identity.name, DEFAULT_GIT_NAME);
+  const email = identityValue(identity.email, DEFAULT_GIT_EMAIL);
+  return [
+    ...publishConfigArgs(),
+    "-c",
+    `user.name=${name}`,
+    "-c",
+    `user.email=${email}`,
+    "commit",
+    "-m",
+    message,
+  ];
 }
 
 export function pushArgs(finalSha, branch) {
   if (!/^[0-9a-f]{40}$/i.test(finalSha)) throw new Error("finalSha is not pinned.");
   if (!/^feedback\/card-[0-9a-f-]{36}$/i.test(branch)) throw new Error("branch is not a card branch.");
-  return ["-c", "core.hooksPath=/dev/null", "push", PUSH_URL, `${finalSha}:refs/heads/${branch}`];
+  return [...publishConfigArgs(), "push", PUSH_URL, `${finalSha}:refs/heads/${branch}`];
 }

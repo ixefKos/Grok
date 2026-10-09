@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-export function runProcess(command, args, { cwd, timeoutMs = null, onData } = {}) {
+export function runProcess(command, args, { cwd, timeoutMs = null, onData, env } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
@@ -9,6 +9,7 @@ export function runProcess(command, args, { cwd, timeoutMs = null, onData } = {}
         ...process.env,
         GIT_TERMINAL_PROMPT: "0",
         GH_NO_UPDATE_NOTIFIER: "1",
+        ...env,
       },
     });
     let stdout = "";
