@@ -190,7 +190,18 @@ for (const line of lines) console.log(line);
     assert.deepEqual(report.sensitive, []);
     assert.equal(report.gitTerminalPrompt, "");
     assert.equal(report.ghConfigDir, "");
-    const allowed = new Set(["PATH", "LANG", "TERM", "TZ", "USER", "SHELL", "HOME", "TMPDIR", "GROK_HOME"]);
+    const allowed = new Set([
+      "PATH",
+      "LANG",
+      "TERM",
+      "TZ",
+      "USER",
+      "SHELL",
+      "HOME",
+      "TMPDIR",
+      "GROK_HOME",
+      "__CF_USER_TEXT_ENCODING",
+    ]);
     for (const key of report.keys) {
       assert.equal(allowed.has(key) || key.startsWith("LC_"), true, key);
     }

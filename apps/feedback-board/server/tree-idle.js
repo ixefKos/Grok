@@ -1,17 +1,25 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { canonicalPath } from "./guard.js";
 
 export const AGENT_BUSY = "A process is still using the agent tree.";
 
+function sameTree(root, target) {
+  const base = path.resolve(root);
+  const resolved = path.resolve(target);
+  if (resolved === base || resolved.startsWith(`${base}${path.sep}`)) return true;
+  const realBase = canonicalPath(base);
+  const realTarget = canonicalPath(resolved);
+  return realTarget === realBase || realTarget.startsWith(`${realBase}${path.sep}`);
+}
+
 function isInside(root, value) {
   if (!value) return false;
-  const base = path.resolve(root);
   let target = String(value);
   if (target.endsWith(" (deleted)")) target = target.slice(0, -" (deleted)".length);
   if (!path.isAbsolute(target)) return false;
-  const resolved = path.resolve(target);
-  return resolved === base || resolved.startsWith(`${base}${path.sep}`);
+  return sameTree(root, target);
 }
 
 function linuxUsers(root) {

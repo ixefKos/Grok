@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { describe, it } from "node:test";
 import { boardGitEnv, pushArgs, PUSH_URL } from "../server/agent-launch.js";
+import { sameExistingPath } from "../server/guard.js";
 import {
   assertWorktreeGitFile,
   BOARD_GIT_CONFIG_ARGS,
@@ -166,6 +167,58 @@ describe("pinned worktree git dir", () => {
     await git(repo, withBoardGitArgs(["worktree", "add", "-b", BRANCH, worktree, "HEAD"]));
     const gitDir = findRegisteredGitDir(common, worktree);
     assert.equal(assertWorktreeGitFile(worktree, gitDir).ok, true);
+  });
+
+  it("matches a worktree git recorded under its real path", async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-gitdir-alias-"));
+    const real = path.join(parent, "real");
+    const alias = path.join(parent, "alias");
+    fs.mkdirSync(real);
+    fs.symlinkSync(real, alias);
+    const repo = path.join(real, "repo");
+    const worktree = path.join(alias, "wt");
+    fs.mkdirSync(repo);
+    await git(repo, ["init", "-b", "main"]);
+    await git(repo, ["commit", "--allow-empty", "-m", "init"]);
+    await git(repo, ["worktree", "add", "-b", BRANCH, worktree, "HEAD"]);
+    const porcelain = await git(repo, ["worktree", "list", "--porcelain"]);
+    assert.equal(porcelain.includes(worktree), false);
+    assert.equal(porcelainListsWorktree(porcelain, worktree), true);
+    const common = (await git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim();
+    const gitDir = findRegisteredGitDir(common, worktree);
+    assert.equal(typeof gitDir, "string");
+    assert.equal(sameExistingPath(gitDir, path.join(repo, ".git", "worktrees", "wt")), true);
+    assert.deepEqual(assertWorktreeGitFile(worktree, gitDir), { ok: true });
+    const other = path.join(real, "other");
+    fs.mkdirSync(other);
+    assert.equal(porcelainListsWorktree(porcelain, other), false);
+    assert.equal(findRegisteredGitDir(common, other), null);
+    const rewritten = assertWorktreeGitFile(path.join(real, "wt"), path.join(parent, "elsewhere"));
+    assert.equal(rewritten.ok, false);
+    assert.match(rewritten.reason, /rewritten/);
+  });
+
+  it("keeps a different directory distinct when the volume preserves case", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-gitdir-case-"));
+    const left = path.join(parent, "Work");
+    const right = path.join(parent, "work");
+    fs.mkdirSync(left);
+    let folds = false;
+    try {
+      fs.mkdirSync(right);
+    } catch (error) {
+      folds = error && error.code === "EEXIST";
+    }
+    try {
+      if (folds) {
+        assert.equal(sameExistingPath(left, right), true);
+      } else {
+        assert.equal(sameExistingPath(left, right), false);
+      }
+      assert.equal(sameExistingPath(left, path.join(parent, "missing")), false);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
   });
 
   it("fails cleanup when worktree remove or branch delete exits non-zero", () => {

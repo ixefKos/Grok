@@ -134,18 +134,28 @@ describe("remote guard", () => {
   });
 
   it("ignores a global includeIf that points into the worktree when the board env is set", async () => {
-    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-includeif-"));
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-includeif-"));
+    const cwd = path.join(parent, "real");
+    const alias = path.join(parent, "alias");
+    fs.mkdirSync(cwd);
+    fs.symlinkSync(cwd, alias);
     await execFileAsync("git", ["init", "-b", "main"], { cwd, env: gitEnv });
     const evil = path.join(cwd, "evil.inc");
     fs.writeFileSync(evil, "[user]\n\tname = EVIL\n");
     const globalFile = path.join(cwd, "fake-global.gitconfig");
-    fs.writeFileSync(globalFile, `[includeIf "gitdir:${cwd}/"]\n\tpath = ${evil}\n`);
+    const real = fs.realpathSync.native(cwd);
+    fs.writeFileSync(globalFile, `[includeIf "gitdir:${alias}/"]\n\tpath = ${evil}\n`);
+    const aliasEnv = { ...gitEnv, GIT_CONFIG_GLOBAL: globalFile };
+    const missed = await gitResult(alias, ["config", "--show-origin", "--get", "user.name"], aliasEnv);
+    assert.equal(missed.code, 1);
+    assert.equal(missed.stdout.includes("EVIL"), false);
+    fs.writeFileSync(globalFile, `[includeIf "gitdir:${real}/"]\n\tpath = ${evil}\n`);
     const exposed = { ...gitEnv, GIT_CONFIG_GLOBAL: globalFile };
-    const seen = await gitResult(cwd, ["config", "--show-origin", "--get", "user.name"], exposed);
+    const seen = await gitResult(alias, ["config", "--show-origin", "--get", "user.name"], exposed);
     assert.equal(seen.code, 0);
     assert.match(seen.stdout, /EVIL/);
     assert.match(seen.stdout, /evil\.inc/);
-    const isolated = await gitResult(cwd, ["config", "--get", "user.name"], boardGitEnv(exposed));
+    const isolated = await gitResult(alias, ["config", "--get", "user.name"], boardGitEnv(exposed));
     assert.equal(isolated.code, 1);
     assert.equal(isolated.stdout.includes("EVIL"), false);
     assert.equal(boardGitEnv(exposed).GIT_CONFIG_GLOBAL, "/dev/null");

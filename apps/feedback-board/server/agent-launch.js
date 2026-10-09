@@ -125,10 +125,11 @@ export function prepareAgentSandbox(realHome = os.homedir()) {
 }
 
 const AGENT_ENV_EXACT = new Set(["PATH", "LANG", "TERM", "TZ", "USER", "SHELL"]);
+const DARWIN_INJECTED_ENV = new Set(["__CF_USER_TEXT_ENCODING"]);
 const SECRET_ENV_NAME = /(TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL)S?$|^AWS_/i;
 
 export function isAllowedAgentEnvKey(key) {
-  return AGENT_ENV_EXACT.has(key) || String(key).startsWith("LC_");
+  return AGENT_ENV_EXACT.has(key) || DARWIN_INJECTED_ENV.has(key) || String(key).startsWith("LC_");
 }
 
 export function droppedCredentialValues(source = process.env) {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -63,7 +64,8 @@ async function setupRepo() {
   await git(repo, ["worktree", "add", "-b", BRANCH, agent, baseSha]);
   const snap = snapshotAgentTree(agent);
   if (!snap.ok) throw new Error(snap.reason);
-  rememberAgentBaseline(CARD_ID, { inodes: snap.inodes, spawnTime: Date.now() / 1000 });
+  const marker = crypto.randomBytes(16).toString("hex");
+  rememberAgentBaseline(CARD_ID, { inodes: snap.inodes, spawnTime: Date.now() / 1000, marker });
   await mutateState((state) => {
     state.cards.push({
       id: CARD_ID,

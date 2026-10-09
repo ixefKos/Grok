@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { assessWorkCopyPath, evaluateStartGuards, isGrokOrigin } from "../server/guard.js";
+import { assessWorkCopyPath, evaluateStartGuards, isGrokOrigin, pathIsUnder } from "../server/guard.js";
 
 const allowed = {
   agentsEnabled: true,
@@ -67,7 +67,9 @@ describe("work copy path guard", () => {
       "/tmp/work-copy",
       "/var/tmp/work",
       "/private/tmp/work",
+      "/private/var/tmp/work",
       "/var/folders/ab/work",
+      "/private/var/folders/ab/work",
       path.join(os.homedir(), ".grok", "work"),
       os.tmpdir(),
     ]) {
@@ -76,7 +78,15 @@ describe("work copy path guard", () => {
       assert.match(result.reason, /temporary or Grok/);
     }
     assert.equal(assessWorkCopyPath("/opt/grok-work").ok, true);
-    const link = path.join("/home/ubuntu", `fb-tmp-link-${process.pid}`);
+    assert.equal(assessWorkCopyPath(path.join(os.homedir(), "Grok", "work")).ok, true);
+    const folded = assessWorkCopyPath(path.join(os.homedir(), ".Grok", "work"));
+    if (process.platform === "darwin") {
+      assert.equal(folded.ok, false);
+      assert.match(folded.reason, /temporary or Grok/);
+    } else {
+      assert.equal(folded.ok, true);
+    }
+    const link = path.join(os.homedir(), `fb-tmp-link-${process.pid}`);
     fs.symlinkSync(os.tmpdir(), link);
     try {
       const viaLink = assessWorkCopyPath(path.join(link, "work-copy"));
@@ -84,6 +94,24 @@ describe("work copy path guard", () => {
       assert.match(viaLink.reason, /temporary or Grok/);
     } finally {
       fs.unlinkSync(link);
+    }
+  });
+
+  it("treats a symlink and its real temp directory as the same root", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "fb-path-"));
+    const real = path.join(parent, "private", "var", "tmp");
+    fs.mkdirSync(real, { recursive: true });
+    const alias = path.join(parent, "var");
+    fs.symlinkSync(path.join(parent, "private", "var"), alias);
+    const work = path.join(alias, "tmp", "work");
+    fs.mkdirSync(work);
+    try {
+      assert.equal(pathIsUnder(work, path.join(alias, "tmp")), true);
+      assert.equal(pathIsUnder(work, real), true);
+      assert.equal(pathIsUnder(path.join(parent, "private", "other"), real), false);
+      assert.equal(assessWorkCopyPath(path.join(os.homedir(), "Grok", "checkout")).ok, true);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
     }
   });
 

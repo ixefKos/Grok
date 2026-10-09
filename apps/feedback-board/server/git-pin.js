@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { boardGitEnv } from "./agent-launch.js";
+import { sameExistingPath } from "./guard.js";
 
 export const BOARD_GIT_CONFIG_ARGS = [
   "-c",
@@ -42,8 +43,11 @@ export function assertWorktreeGitFile(worktreePath, gitDir) {
   } catch {
     return { ok: false, reason: "Worktree gitdir file is missing." };
   }
-  const expected = `gitdir: ${gitDir}`;
-  if (text !== `${expected}\n` && text !== expected) {
+  const actual = text.replace(/\r?\n$/, "");
+  const prefix = "gitdir: ";
+  if (!actual.startsWith(prefix)) return { ok: false, reason: "Worktree gitdir was rewritten." };
+  const stated = actual.slice(prefix.length).trim();
+  if (!stated || !sameExistingPath(path.resolve(worktreePath, stated), gitDir)) {
     return { ok: false, reason: "Worktree gitdir was rewritten." };
   }
   return { ok: true };
@@ -76,10 +80,9 @@ export async function runIfPinned(plan, spawnImpl) {
 }
 
 export function porcelainListsWorktree(porcelain, worktreePath) {
-  const wanted = path.resolve(worktreePath);
   return String(porcelain ?? "")
     .split(/\r?\n/)
-    .some((line) => line.startsWith("worktree ") && path.resolve(line.slice("worktree ".length).trim()) === wanted);
+    .some((line) => line.startsWith("worktree ") && sameExistingPath(line.slice("worktree ".length).trim(), worktreePath));
 }
 
 export function findRegisteredGitDir(commonDir, worktreePath) {
@@ -103,7 +106,7 @@ export function findRegisteredGitDir(commonDir, worktreePath) {
     }
     if (st.isSymbolicLink() || !st.isFile()) continue;
     const text = fs.readFileSync(pointer, "utf8").replace(/\r?\n$/, "");
-    if (path.resolve(text) !== expected) continue;
+    if (!sameExistingPath(text, expected)) continue;
     if (found) return null;
     found = path.join(root, entry.name);
   }

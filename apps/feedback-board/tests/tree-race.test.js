@@ -497,6 +497,40 @@ while True:
     assert.deepEqual(killed, []);
   });
 
+  it("treats a missing darwin marker as busy and does not scan", () => {
+    let scanned = false;
+    const result = killMarkedProcesses("", "darwin", {
+      execFileSync: () => {
+        scanned = true;
+        return "";
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, AGENT_BUSY);
+    assert.equal(scanned, false);
+    assert.equal(killMarkedProcesses(undefined, "linux").ok, true);
+  });
+
+  it("counts an open file reported through a symlink as using the tree", () => {
+    const parent = fs.mkdtempSync(path.join(os.homedir(), "fb-lsof-alias-"));
+    const real = path.join(parent, "real");
+    const alias = path.join(parent, "alias");
+    fs.mkdirSync(real);
+    fs.symlinkSync(real, alias);
+    const file = path.join(real, "keep.txt");
+    fs.writeFileSync(file, "x");
+    try {
+      const busy = interpretLsofOutput(`p9\nn${file}\n`, alias);
+      assert.equal(busy.ok, false);
+      assert.deepEqual(busy.blocked, ["9"]);
+      const outside = path.join(parent, "outside");
+      fs.mkdirSync(outside);
+      assert.equal(interpretLsofOutput(`p9\nn${file}\n`, outside).ok, true);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   it("treats a failed marker scan as busy and does not kill", () => {
     const killed = [];
     const result = killMarkedProcesses("feedbac4", "darwin", {

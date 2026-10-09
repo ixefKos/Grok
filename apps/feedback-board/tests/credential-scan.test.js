@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -91,7 +92,8 @@ async function setupRepo() {
   await git(repo, ["worktree", "add", "-b", BRANCH, agent, baseSha]);
   const snap = snapshotAgentTree(agent);
   if (!snap.ok) throw new Error(snap.reason);
-  rememberAgentBaseline(CARD_ID, { inodes: snap.inodes, spawnTime: 0, authBytes: AUTH });
+  const marker = crypto.randomBytes(16).toString("hex");
+  rememberAgentBaseline(CARD_ID, { inodes: snap.inodes, spawnTime: 0, authBytes: AUTH, marker });
   await mutateState((state) => {
     state.cards.push({
       id: CARD_ID,
@@ -102,7 +104,7 @@ async function setupRepo() {
       outOfScopePaths: [],
     });
   }, stateRoot);
-  return { parent, repo, agent, stateRoot, baseSha };
+  return { parent, repo, agent, stateRoot, baseSha, marker };
 }
 
 describe("credential scan", () => {
@@ -246,6 +248,8 @@ describe("credential scan", () => {
       GH_TOKEN: "poison-gh-token-value",
       GIT_ASKPASS: "/tmp/askpass",
       AWS_SESSION: shortAws,
+      __CF_USER_TEXT_ENCODING: "0x1F5:0:0",
+      DYLD_INSERT_LIBRARIES: "/tmp/injected.dylib",
     };
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "fb-env-"));
     const home = path.join(root, "home");
@@ -254,8 +258,23 @@ describe("credential scan", () => {
       const env = scrubAgentEnv(parent, { home, tmp, marker: "abc" });
       assert.deepEqual(
         Object.keys(env).sort(),
-        ["GROK_HOME", "HOME", "LANG", "LC_ALL", "PATH", RUN_MARKER_ENV, "SHELL", "TERM", "TMPDIR", "TZ", "USER"].sort(),
+        [
+          "__CF_USER_TEXT_ENCODING",
+          "GROK_HOME",
+          "HOME",
+          "LANG",
+          "LC_ALL",
+          "PATH",
+          RUN_MARKER_ENV,
+          "SHELL",
+          "TERM",
+          "TMPDIR",
+          "TZ",
+          "USER",
+        ].sort(),
       );
+      assert.equal(env.__CF_USER_TEXT_ENCODING, "0x1F5:0:0");
+      assert.equal(Object.hasOwn(env, "DYLD_INSERT_LIBRARIES"), false);
       assert.equal(env.HOME, home);
       assert.equal(env.TMPDIR, tmp);
       assert.equal(env.GROK_HOME, `${home}/.grok`);
@@ -342,6 +361,7 @@ async function assertRefused(bytes, pattern, secrets, extraBaseline) {
       inodes: snap.inodes,
       spawnTime: 0,
       authBytes: AUTH,
+      marker: fixture.marker,
       ...extraBaseline,
     });
   }

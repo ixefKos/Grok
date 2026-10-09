@@ -41,16 +41,20 @@ export function isGrokOrigin(url) {
   return parsed.host === "github.com" && parsed.owner === "ixefKos" && parsed.repo === "Grok";
 }
 
+function nativeRealpath(filePath) {
+  return fs.realpathSync.native(filePath);
+}
+
 export function canonicalPath(filePath) {
   const resolved = path.resolve(String(filePath ?? ""));
   try {
-    return fs.realpathSync(resolved);
+    return nativeRealpath(resolved);
   } catch {
     const missing = [];
     let cursor = resolved;
     while (cursor !== path.dirname(cursor)) {
       try {
-        return path.join(fs.realpathSync(cursor), ...missing);
+        return path.join(nativeRealpath(cursor), ...missing);
       } catch {
         missing.unshift(path.basename(cursor));
         cursor = path.dirname(cursor);
@@ -60,13 +64,39 @@ export function canonicalPath(filePath) {
   }
 }
 
-export function pathIsTempOrGrok(filePath) {
+export function sameExistingPath(left, right) {
+  try {
+    return nativeRealpath(path.resolve(String(left))) === nativeRealpath(path.resolve(String(right)));
+  } catch {
+    return false;
+  }
+}
+
+export function pathIsUnder(filePath, root) {
   const real = canonicalPath(filePath);
-  const roots = [os.tmpdir(), "/tmp", "/private/tmp", "/var/tmp", "/var/folders", path.join(os.homedir(), ".grok")];
-  return roots.some((root) => {
-    const base = path.resolve(root);
-    return real === base || real.startsWith(`${base}${path.sep}`);
-  });
+  const base = canonicalPath(root);
+  return real === base || real.startsWith(`${base}${path.sep}`);
+}
+
+const TEMP_ROOTS = ["/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/var/folders", "/private/var/folders"];
+
+function isGrokHomeComponent(name) {
+  if (process.platform === "darwin") return name.toLowerCase() === ".grok";
+  return name === ".grok";
+}
+
+export function pathIsGrokHome(filePath) {
+  const real = canonicalPath(filePath);
+  const home = canonicalPath(os.homedir());
+  if (real !== home && !real.startsWith(`${home}${path.sep}`)) return false;
+  const [head] = real.slice(home.length).split(path.sep).filter(Boolean);
+  return Boolean(head) && isGrokHomeComponent(head);
+}
+
+export function pathIsTempOrGrok(filePath) {
+  if (TEMP_ROOTS.some((root) => pathIsUnder(filePath, root))) return true;
+  if (pathIsUnder(filePath, os.tmpdir())) return true;
+  return pathIsGrokHome(filePath);
 }
 
 export function assessWorkCopyPath(workCopyPath, realWorkCopyPath = workCopyPath) {
