@@ -1,0 +1,8 @@
+{
+  "inboxRepo": "ixefKos/feedback-inbox",
+  "agentsEnabled": false,
+  "dailyCap": 3,
+  "workCopyPath": "",
+  "grokCommand": "grok",
+  "port": 4173
+}
