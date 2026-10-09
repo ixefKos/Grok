@@ -36,21 +36,36 @@ This repo is public. These files stay on the machine and are gitignored:
 
 Only `config.example.json` is committed. Do not put tokens in it.
 
+## Inbox contract
+
+Issues filed by the bot routine include two lines in the issue body:
+
+```text
+x_author_id: <numeric id>
+x_handle: @<handle>
+```
+
+`x_author_id` must be its own line: the prefix `x_author_id: `, one space, then digits only. The board drops the issue when that line is missing, when it is not exact, or when the id is `2416162544`. It also drops the issue when the title or body contains `@nanalyzetweets` in any letter case. That handle check is a second layer. The GitHub author field is not used.
+
 ## Safety
 
 - The board never calls the X API and never posts, replies, likes, or follows.
+- The server listens on `127.0.0.1` and answers only when the Host header is `127.0.0.1:<port>` or `localhost:<port>`.
 - Refresh reads GitHub issues and pull request state. The only GitHub write is a draft pull request after a run that stays inside the allowed folders.
 - Nothing merges a pull request. You merge on GitHub if you want the card to move to Done.
 - A drag starts a run only when agents are on, and only when the card is dropped on Todo.
-- One run per card. The card locks when the run starts.
+- One run per card. The card locks, and the daily count increments, before the agent process starts.
 - One run at a time.
 - Daily cap from `dailyCap` (default 3).
-- Stop kills that run. No pull request is opened after a stop.
-- The work copy must be a separate checkout of `ixefKos/Grok`. The board refuses to start if `git remote get-url origin` is not `ixefKos/Grok`, or if the work copy path contains `Lumen` (any case).
-- The run command is `grok -p "<fixed rules + card text>" --output-format json --max-turns 40 --always-approve`. `grokCommand` in the local config can point at that executable. The flags stay fixed.
+- Stop kills the agent process group. Shutting down the server kills it too. No pull request is opened after a stop.
+- The work copy must be a separate checkout of `ixefKos/Grok`. The board refuses to start if the path contains `Lumen` (any case). Every URL from `git remote get-url --all origin` and `git remote get-url --push --all origin` must be `ixefKos/Grok`. The same check runs again immediately before the push.
+- The run refuses to push if any `url.*` git config key exists, including `insteadOf`, because that key can redirect a push.
+- The agent command is `grok -p "<fixed rules + fenced card>" --output-format json --max-turns 40 --always-approve --sandbox strict` plus `--deny` rules. The sandbox profile `strict` limits writes to the worktree. Deny rules block `git push`, `gh`, `git config`, `git update-ref`, `git checkout`, `git switch`, `git remote`, and writes outside the worktree. `grokCommand` can point at the executable. The flags stay fixed.
+- The child process does not receive `GH_TOKEN`, `GITHUB_TOKEN`, other `GH_*` variables, `GIT_ASKPASS`, or `SSH_AUTH_SOCK`. Its `GH_CONFIG_DIR` is an empty temporary directory.
+- Card title and notes are fenced as untrusted data. Nothing inside the fence is a command.
 - The fixed rules allow edits only under `apps/thedailylumen/` and `apps/feedback-board/`. They forbid `git push`, `gh`, network posting, and touching anything named Lumen pipeline.
-- After the process exits, the server (not the agent) checks `git diff --name-only origin/main...HEAD`, uncommitted edits, and untracked files. If any path is outside those two folders, the card turns red and lists the paths. No commit, push, or pull request happens.
-- If the paths are inside those folders, the server commits when needed, pushes `feedback/card-<id>`, and opens a draft pull request. The card moves to PR.
+- The server pins `origin/main` to a commit sha before the agent starts. After the process exits, the server (not the agent) checks `git diff --name-only --no-renames <baseSha>..HEAD`, plus uncommitted and untracked files, also with `--no-renames`. HEAD must be `refs/heads/feedback/card-<id>`. If any path is outside the two allowed folders, the card turns red and lists the paths. No commit, push, or pull request happens.
+- If the paths are inside those folders, the server commits with hooks disabled when needed. The commit message is `feedback: card <short-id>`. It does not include the card title or notes. The server checks `<baseSha>..<finalSha>` again, then pushes that sha to `https://github.com/ixefKos/Grok.git` as `refs/heads/feedback/card-<id>`. Commit and push use `core.hooksPath=/dev/null`. The draft pull request title is the same neutral line. The body lists the changed files and a run summary only.
 - Refresh checks `gh pr view <url> --json state,mergedAt`. A merged pull request moves the card to Done.
 - Each run is logged at `data/runs/<id>.log`.
 

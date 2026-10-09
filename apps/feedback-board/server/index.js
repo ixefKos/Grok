@@ -3,6 +3,7 @@ import path from "node:path";
 import express from "express";
 import { appRoot, loadConfig } from "./config.js";
 import { addTypedCard, fileCardInTodo, moveCard } from "./cards.js";
+import { requireLocalHost } from "./http-guard.js";
 import { pullInbox, refreshPullRequests } from "./inbox.js";
 import { getRunningCardId, localDay, reconcileInterruptedRuns, runsOnDay, startCardRun, stopAllRuns, stopRun } from "./runs.js";
 import { readState } from "./store.js";
@@ -13,6 +14,7 @@ const distDir = path.join(appRoot(), "dist");
 const app = express();
 
 app.disable("x-powered-by");
+app.use(requireLocalHost(config.port));
 app.use(express.json({ limit: "1mb" }));
 
 function boardPayload(state) {

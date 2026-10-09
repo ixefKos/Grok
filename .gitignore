@@ -4,13 +4,3 @@ proof/
 .cursor/skills/verify-*/artifacts/
 .cursor/skills/verify-*/proof/
 **/grok-verify-*/
-
-# Local feedback board. This repo is public.
-apps/feedback-board/data/
-apps/feedback-board/config.local.json
-apps/feedback-board/.env
-apps/feedback-board/node_modules/
-apps/feedback-board/dist/
-.env
-**/.env
-**/config.local.json

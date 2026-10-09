@@ -22,10 +22,10 @@ describe("work copy path guard", () => {
 
   it("refuses a work copy path that contains Lumen", () => {
     for (const workCopyPath of [
-      "/Users/xavier/Grok/Lumen",
-      "/Users/xavier/src/lumen-copy",
+      "/opt/work/Lumen",
+      "/tmp/src/lumen-copy",
       "/tmp/LUMEN/work",
-      "/home/xavier/thedailylumen/Grok",
+      "/home/example/thedailylumen/copy",
     ]) {
       const result = evaluateStartGuards({ ...allowed, workCopyPath });
       assert.equal(result.ok, false);

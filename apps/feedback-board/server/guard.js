@@ -67,8 +67,57 @@ export function evaluateStartGuards(input) {
   }
   const pathCheck = assessWorkCopyPath(source.workCopyPath, source.realWorkCopyPath);
   if (!pathCheck.ok) return pathCheck;
+  if (source.skipOriginCheck === true) return { ok: true };
   if (!isGrokOrigin(source.originUrl)) {
     return { ok: false, reason: "Work copy origin is not ixefKos/Grok." };
+  }
+  return { ok: true };
+}
+
+const SHA = /^[0-9a-f]{40}$/i;
+
+function remoteLines(text) {
+  return String(text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+export function evaluateRemoteGuard({ fetchUrls, pushUrls, urlConfigText } = {}) {
+  const fetchList = remoteLines(fetchUrls);
+  const pushList = remoteLines(pushUrls);
+  if (fetchList.length === 0 || pushList.length === 0) {
+    return { ok: false, reason: "Work copy origin is not ixefKos/Grok." };
+  }
+  for (const url of [...fetchList, ...pushList]) {
+    if (!isGrokOrigin(url)) {
+      return { ok: false, reason: "Work copy origin is not ixefKos/Grok." };
+    }
+  }
+  if (remoteLines(urlConfigText).length > 0) {
+    return { ok: false, reason: "Work copy has a url.* git config key." };
+  }
+  return { ok: true };
+}
+
+export function gateDiffArgs(baseSha, head = "HEAD") {
+  if (!SHA.test(String(baseSha))) throw new Error("baseSha is not pinned.");
+  if (head !== "HEAD" && !SHA.test(String(head))) throw new Error("head is not pinned.");
+  const range = `${String(baseSha)}..${head}`;
+  if (range.includes("origin/main")) throw new Error("diff range must not use origin/main.");
+  return ["diff", "--name-only", "--no-renames", range];
+}
+
+export function assertHeadOnBranch({ headSha, branchSha, branch, symbolicHead } = {}) {
+  if (!/^feedback\/card-[0-9a-f-]{36}$/i.test(String(branch || ""))) {
+    return { ok: false, reason: "HEAD is not the card branch." };
+  }
+  const expected = `refs/heads/${branch}`;
+  const head = String(headSha || "").trim().toLowerCase();
+  const ref = String(branchSha || "").trim().toLowerCase();
+  const symbolic = String(symbolicHead || "").trim();
+  if (symbolic !== expected || !SHA.test(head) || head !== ref) {
+    return { ok: false, reason: "HEAD is not the card branch." };
   }
   return { ok: true };
 }
