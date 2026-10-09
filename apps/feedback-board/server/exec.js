@@ -1,17 +1,32 @@
 import { spawn } from "node:child_process";
 
+const observers = new Set();
+
+export function observeProcesses(listener) {
+  observers.add(listener);
+  return () => observers.delete(listener);
+}
+
 export function runProcess(command, args, { cwd, timeoutMs = null, onData, env } = {}) {
+  const childEnv = {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GH_NO_UPDATE_NOTIFIER: "1",
+    ...env,
+  };
+  for (const key of Object.keys(childEnv)) {
+    if (childEnv[key] == null) delete childEnv[key];
+  }
+  for (const listener of observers) {
+    listener({ command, args, cwd, env: childEnv });
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
       shell: false,
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: "0",
-        GH_NO_UPDATE_NOTIFIER: "1",
-        ...env,
-      },
+      env: childEnv,
     });
+    const stdoutChunks = [];
     let stdout = "";
     let stderr = "";
     let timer = null;
@@ -25,6 +40,7 @@ export function runProcess(command, args, { cwd, timeoutMs = null, onData, env }
       handler(value);
     };
     child.stdout?.on("data", (chunk) => {
+      stdoutChunks.push(chunk);
       const text = chunk.toString();
       stdout += text;
       onData?.(text);
@@ -35,6 +51,8 @@ export function runProcess(command, args, { cwd, timeoutMs = null, onData, env }
       onData?.(text);
     });
     child.on("error", (error) => finish(reject, error));
-    child.on("close", (code, signal) => finish(resolve, { code, signal, stdout, stderr }));
+    child.on("close", (code, signal) =>
+      finish(resolve, { code, signal, stdout, stderr, stdoutBuffer: Buffer.concat(stdoutChunks) }),
+    );
   });
 }

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
-import { evaluateStartGuards, isGrokOrigin } from "../server/guard.js";
+import { assessWorkCopyPath, evaluateStartGuards, isGrokOrigin } from "../server/guard.js";
 
 const allowed = {
   agentsEnabled: true,
@@ -56,6 +59,31 @@ describe("work copy path guard", () => {
       const result = evaluateStartGuards({ ...allowed, originUrl });
       assert.equal(result.ok, false, originUrl);
       assert.match(result.reason, /ixefKos\/Grok/);
+    }
+  });
+
+  it("refuses a work copy under a temporary or Grok directory", () => {
+    for (const workCopyPath of [
+      "/tmp/work-copy",
+      "/var/tmp/work",
+      "/private/tmp/work",
+      "/var/folders/ab/work",
+      path.join(os.homedir(), ".grok", "work"),
+      os.tmpdir(),
+    ]) {
+      const result = assessWorkCopyPath(workCopyPath);
+      assert.equal(result.ok, false, workCopyPath);
+      assert.match(result.reason, /temporary or Grok/);
+    }
+    assert.equal(assessWorkCopyPath("/opt/grok-work").ok, true);
+    const link = path.join("/home/ubuntu", `fb-tmp-link-${process.pid}`);
+    fs.symlinkSync(os.tmpdir(), link);
+    try {
+      const viaLink = assessWorkCopyPath(path.join(link, "work-copy"));
+      assert.equal(viaLink.ok, false);
+      assert.match(viaLink.reason, /temporary or Grok/);
+    } finally {
+      fs.unlinkSync(link);
     }
   });
 

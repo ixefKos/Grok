@@ -148,4 +148,10 @@ describe("changed-files gate bypasses", () => {
       "apps/feedback-board/loose",
     ]);
   });
+
+  it("rejects git mode 160000 in a raw diff", () => {
+    const raw = ":160000 160000 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb M\tapps/feedback-board/vendor\n";
+    assert.deepEqual(symlinkPathsFromRaw(raw), ["apps/feedback-board/vendor"]);
+    assert.equal(gateDiffArgs("a".repeat(40), "b".repeat(40)).includes("--ignore-submodules=all"), true);
+  });
 });

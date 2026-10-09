@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 export const ALLOWED_PREFIXES = ["apps/thedailylumen/", "apps/feedback-board/"];
@@ -40,12 +41,43 @@ export function isGrokOrigin(url) {
   return parsed.host === "github.com" && parsed.owner === "ixefKos" && parsed.repo === "Grok";
 }
 
+export function canonicalPath(filePath) {
+  const resolved = path.resolve(String(filePath ?? ""));
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    const missing = [];
+    let cursor = resolved;
+    while (cursor !== path.dirname(cursor)) {
+      try {
+        return path.join(fs.realpathSync(cursor), ...missing);
+      } catch {
+        missing.unshift(path.basename(cursor));
+        cursor = path.dirname(cursor);
+      }
+    }
+    return resolved;
+  }
+}
+
+export function pathIsTempOrGrok(filePath) {
+  const real = canonicalPath(filePath);
+  const roots = [os.tmpdir(), "/tmp", "/private/tmp", "/var/tmp", "/var/folders", path.join(os.homedir(), ".grok")];
+  return roots.some((root) => {
+    const base = path.resolve(root);
+    return real === base || real.startsWith(`${base}${path.sep}`);
+  });
+}
+
 export function assessWorkCopyPath(workCopyPath, realWorkCopyPath = workCopyPath) {
   if (typeof workCopyPath !== "string" || !workCopyPath.trim()) {
     return { ok: false, reason: "Work copy path is not set." };
   }
   if (pathContainsLumen(workCopyPath) || pathContainsLumen(realWorkCopyPath)) {
     return { ok: false, reason: "Work copy path contains Lumen." };
+  }
+  if (pathIsTempOrGrok(workCopyPath) || pathIsTempOrGrok(realWorkCopyPath)) {
+    return { ok: false, reason: "Work copy path is under a temporary or Grok directory." };
   }
   return { ok: true };
 }
@@ -129,12 +161,12 @@ export function gateDiffArgs(baseSha, head = "HEAD") {
   if (head !== "HEAD" && !SHA.test(String(head))) throw new Error("head is not pinned.");
   const range = `${String(baseSha)}..${head}`;
   if (range.includes("origin/main")) throw new Error("diff range must not use origin/main.");
-  return ["diff", "--name-only", "--no-renames", range];
+  return ["diff", "--name-only", "--no-renames", "--ignore-submodules=all", range];
 }
 
 export function gateRawArgs(baseSha, head = "HEAD") {
   const range = gateDiffArgs(baseSha, head).at(-1);
-  return ["diff", "--raw", "--no-renames", range];
+  return ["diff", "--raw", "--no-renames", "--ignore-submodules=all", range];
 }
 
 export function symlinkPathsFromRaw(raw) {
@@ -146,7 +178,7 @@ export function symlinkPathsFromRaw(raw) {
     const parts = line.slice(0, tab).split(" ");
     const oldMode = parts[0].slice(1);
     const newMode = parts[1];
-    if (oldMode !== "120000" && newMode !== "120000") continue;
+    if (oldMode !== "120000" && newMode !== "120000" && oldMode !== "160000" && newMode !== "160000") continue;
     let filePath = line.slice(tab + 1);
     if (filePath.startsWith('"') && filePath.endsWith('"')) filePath = filePath.slice(1, -1);
     if (filePath) paths.push(filePath);

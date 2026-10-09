@@ -9,6 +9,7 @@ import { boardGitEnv, pushArgs, PUSH_URL } from "../server/agent-launch.js";
 import {
   assertWorktreeGitFile,
   BOARD_GIT_CONFIG_ARGS,
+  cleanupVerdict,
   failedSpawnCleanupArgs,
   findRegisteredGitDir,
   porcelainListsWorktree,
@@ -128,6 +129,9 @@ describe("pinned worktree git dir", () => {
       "http.proxy=",
       "core.sshCommand=",
       "core.hooksPath=/dev/null",
+      "diff.ignoreSubmodules=all",
+      "status.submoduleSummary=false",
+      "submodule.recurse=false",
     ]) {
       assert.equal(plan.args.includes(flag), true, flag);
     }
@@ -154,5 +158,15 @@ describe("pinned worktree git dir", () => {
     await git(repo, withBoardGitArgs(["worktree", "add", "-b", BRANCH, worktree, "HEAD"]));
     const gitDir = findRegisteredGitDir(common, worktree);
     assert.equal(assertWorktreeGitFile(worktree, gitDir).ok, true);
+  });
+
+  it("fails cleanup when worktree remove or branch delete exits non-zero", () => {
+    const cleanup = failedSpawnCleanupArgs("/worktree", BRANCH);
+    assert.deepEqual(cleanup.prune, ["worktree", "prune"]);
+    assert.deepEqual(cleanupVerdict([{ code: 0 }, { code: 0 }, { code: 0 }]), { ok: true });
+    const failed = cleanupVerdict([{ code: 0 }, { code: 1, signal: null }, { code: 0 }]);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.reason, "Could not clean up the worktree.");
+    assert.equal(cleanupVerdict([{ code: 0 }, { code: null, signal: "SIGKILL" }]).ok, false);
   });
 });

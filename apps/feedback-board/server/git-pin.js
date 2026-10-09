@@ -12,6 +12,12 @@ export const BOARD_GIT_CONFIG_ARGS = [
   "core.sshCommand=",
   "-c",
   "core.hooksPath=/dev/null",
+  "-c",
+  "diff.ignoreSubmodules=all",
+  "-c",
+  "status.submoduleSummary=false",
+  "-c",
+  "submodule.recurse=false",
 ];
 
 export function withBoardGitArgs(args) {
@@ -107,5 +113,12 @@ export function failedSpawnCleanupArgs(worktreePath, branch) {
   return {
     remove: ["worktree", "remove", "--force", worktreePath],
     branch: ["branch", "-D", branch],
+    prune: ["worktree", "prune"],
   };
+}
+
+export function cleanupVerdict(results) {
+  const bad = (results || []).filter((result) => !result || result.signal || result.code !== 0);
+  if (bad.length === 0) return { ok: true };
+  return { ok: false, reason: "Could not clean up the worktree." };
 }
