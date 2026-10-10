@@ -1,0 +1,128 @@
+import fs from "node:fs";
+import path from "node:path";
+import { boardGitEnv } from "./agent-launch.js";
+import { sameExistingPath } from "./guard.js";
+
+export const BOARD_GIT_CONFIG_ARGS = [
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "http.sslVerify=true",
+  "-c",
+  "http.proxy=",
+  "-c",
+  "core.sshCommand=",
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "diff.ignoreSubmodules=all",
+  "-c",
+  "status.submoduleSummary=false",
+  "-c",
+  "submodule.recurse=false",
+];
+
+export function withBoardGitArgs(args) {
+  return [...BOARD_GIT_CONFIG_ARGS, ...(args || [])];
+}
+
+export function assertWorktreeGitFile(worktreePath, gitDir) {
+  const dotGit = path.join(worktreePath, ".git");
+  let st;
+  try {
+    st = fs.lstatSync(dotGit);
+  } catch {
+    return { ok: false, reason: "Worktree gitdir file is missing." };
+  }
+  if (st.isSymbolicLink() || !st.isFile()) {
+    return { ok: false, reason: "Worktree gitdir file is not a regular file." };
+  }
+  let text;
+  try {
+    text = fs.readFileSync(dotGit, "utf8");
+  } catch {
+    return { ok: false, reason: "Worktree gitdir file is missing." };
+  }
+  const actual = text.replace(/\r?\n$/, "");
+  const prefix = "gitdir: ";
+  if (!actual.startsWith(prefix)) return { ok: false, reason: "Worktree gitdir was rewritten." };
+  const stated = actual.slice(prefix.length).trim();
+  if (!stated || !sameExistingPath(path.resolve(worktreePath, stated), gitDir)) {
+    return { ok: false, reason: "Worktree gitdir was rewritten." };
+  }
+  return { ok: true };
+}
+
+export function postRunGitPlan({ worktreePath, gitDir, args, env = {} } = {}) {
+  const verdict = assertWorktreeGitFile(worktreePath, gitDir);
+  if (!verdict.ok) {
+    return { ok: false, ran: false, reason: verdict.reason, args: null, env: null };
+  }
+  return {
+    ok: true,
+    ran: true,
+    reason: null,
+    args: withBoardGitArgs(args),
+    env: {
+      ...boardGitEnv(env),
+      GIT_DIR: gitDir,
+      GIT_WORK_TREE: path.resolve(worktreePath),
+    },
+  };
+}
+
+export async function runIfPinned(plan, spawnImpl) {
+  if (!plan || !plan.ok) {
+    return { ok: false, ran: false, reason: plan ? plan.reason : "Worktree gitdir was rewritten." };
+  }
+  const result = await spawnImpl(plan.args, plan.env);
+  return { ok: true, ran: true, result };
+}
+
+export function porcelainListsWorktree(porcelain, worktreePath) {
+  return String(porcelain ?? "")
+    .split(/\r?\n/)
+    .some((line) => line.startsWith("worktree ") && sameExistingPath(line.slice("worktree ".length).trim(), worktreePath));
+}
+
+export function findRegisteredGitDir(commonDir, worktreePath) {
+  const root = path.resolve(commonDir, "worktrees");
+  const expected = path.resolve(worktreePath, ".git");
+  let found = null;
+  let entries;
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const pointer = path.join(root, entry.name, "gitdir");
+    let st;
+    try {
+      st = fs.lstatSync(pointer);
+    } catch {
+      continue;
+    }
+    if (st.isSymbolicLink() || !st.isFile()) continue;
+    const text = fs.readFileSync(pointer, "utf8").replace(/\r?\n$/, "");
+    if (!sameExistingPath(text, expected)) continue;
+    if (found) return null;
+    found = path.join(root, entry.name);
+  }
+  return found;
+}
+
+export function failedSpawnCleanupArgs(worktreePath, branch) {
+  return {
+    remove: ["worktree", "remove", "--force", worktreePath],
+    branch: ["branch", "-D", branch],
+    prune: ["worktree", "prune"],
+  };
+}
+
+export function cleanupVerdict(results) {
+  const bad = (results || []).filter((result) => !result || result.signal || result.code !== 0);
+  if (bad.length === 0) return { ok: true };
+  return { ok: false, reason: "Could not clean up the worktree." };
+}
